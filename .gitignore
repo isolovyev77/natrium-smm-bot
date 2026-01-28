@@ -1,0 +1,69 @@
+# Виртуальные окружения
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# Артефакты Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.sqlite3
+*.db
+
+# Настройки IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Файлы окружения и секреты
+.env
+.env.*
+!.env.example
+config.local.py
+secrets/
+*.key
+*.pem
+credentials.json
+
+# Логи
+*.log
+logs/
+output/generated_posts*.md
+
+# Кэш pytest / coverage
+.pytest_cache/
+htmlcov/
+.coverage*
+.tox/
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
+
+# Временные файлы
+*.tmp
+*.bak
+*.backup
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Документация (сгенерированная)
+docs/_build/
+site/
