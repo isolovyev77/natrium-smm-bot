@@ -1,0 +1,23 @@
+[Unit]
+Description=Natrium SMM Bot - Telegram Bot for Social Media Management
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/natrium-smm-bot
+Environment="PATH=/opt/natrium-smm-bot/venv/bin"
+ExecStart=/opt/natrium-smm-bot/venv/bin/python3 /opt/natrium-smm-bot/src/telegram_bot.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/var/log/natrium-smm-bot.log
+StandardError=append:/var/log/natrium-smm-bot-error.log
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
