@@ -1,0 +1,79 @@
+name: Deploy to Oracle Cloud
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'prompts/**'
+      - 'requirements.txt'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:  # Ручной запуск из GitHub UI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🚀 Deploy to Oracle Virtual Machine
+      uses: appleboy/ssh-action@v1.0.3
+      env:
+        # Опционально: передаем секреты как переменные окружения для обновления .env
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
+        YANDEX_AGENT_ID: ${{ secrets.YANDEX_AGENT_ID }}
+        YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
+      with:
+        host: ${{ secrets.ORACLE_SSH_HOST }}
+        username: ${{ secrets.ORACLE_SSH_USER }}
+        key: ${{ secrets.DEPLOY_KEY }}
+        port: ${{ secrets.ORACLE_SSH_PORT || 22 }}
+        envs: TELEGRAM_BOT_TOKEN,YANDEX_FOLDER_ID,YANDEX_AGENT_ID,YANDEX_API_KEY
+        script: |
+          cd /opt/natrium-smm-bot
+          
+          echo "📦 Pulling latest changes..."
+          git pull origin main
+          
+          # ====== Обновление .env файла ======
+          echo "📝 Updating .env file..."
+          touch .env
+          
+          update_env_var() {
+            local key=$1
+            local value=$2
+            if [ -n "$value" ]; then
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${value}|" .env
+                echo "  ✓ Updated $key"
+              else
+                echo "${key}=${value}" >> .env
+                echo "  ✓ Added $key"
+              fi
+            fi
+          }
+          
+          update_env_var "TELEGRAM_BOT_TOKEN" "$TELEGRAM_BOT_TOKEN"
+          update_env_var "YANDEX_FOLDER_ID" "$YANDEX_FOLDER_ID"
+          update_env_var "YANDEX_AGENT_ID" "$YANDEX_AGENT_ID"
+          update_env_var "YANDEX_API_KEY" "$YANDEX_API_KEY"
+          
+          chmod 600 .env
+          echo "✅ .env updated"
+          
+          # ====== Установка зависимостей ======
+          echo "📚 Installing dependencies..."
+          venv/bin/pip install -r requirements.txt --quiet
+          echo "✅ Dependencies installed"
+          
+          # ====== Перезапуск сервиса ======
+          echo "🔄 Restarting service..."
+          sudo systemctl stop natrium-smm-bot
+          sleep 2
+          sudo systemctl start natrium-smm-bot
+          sleep 3
+          echo "✅ Deployment completed!"
+          
+          # Проверка статуса
+          sudo systemctl status natrium-smm-bot --no-pager | head -10
