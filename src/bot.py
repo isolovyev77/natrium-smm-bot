@@ -204,15 +204,19 @@ class NatriumBot:
             logger.info(f"🔍 DEBUG: API response keys: {data.keys()}")
             logger.info(f"🔍 DEBUG: Full response: {data}")
             
-            result = data.get("output_text", "")
+            # Правильная структура Yandex API response
+            result = ""
+            if "output" in data and len(data["output"]) > 0:
+                output_item = data["output"][0]
+                if "content" in output_item and len(output_item["content"]) > 0:
+                    content_item = output_item["content"][0]
+                    result = content_item.get("text", "")
             
-            # Проверяем альтернативные поля для результата
+            # Fallback на старые поля если структура другая
+            if not result:
+                result = data.get("output_text", "")
             if not result:
                 result = data.get("text", "")
-            if not result:
-                result = data.get("result", {}).get("text", "")
-            if not result:
-                result = data.get("content", "")
                 
             logger.info(f"🔍 DEBUG: Extracted result length: {len(result) if result else 0}")
 
