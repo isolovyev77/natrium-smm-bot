@@ -48,19 +48,44 @@ def acquire_lock():
         if LOCK_FILE:
             LOCK_FILE.close()
         
-        # Читаем PID другого процесса
+        # Пытаемся найти PID другого процесса
+        other_pid = None
         try:
-            with open(PID_FILE, 'r') as f:
-                other_pid = f.read().strip()
-                logger.error(f"❌ ОШИБКА: Другой экземпляр бота уже запущен (PID: {other_pid})")
-                print(f"\n❌ ОШИБКА: Другой экземпляр natrium-smm-bot уже запущен!")
-                print(f"   PID запущенного процесса: {other_pid}")
-                print(f"\nЧтобы остановить его, выполните:")
-                print(f"   sudo systemctl stop natrium-smm-bot")
-                print(f"   или: kill {other_pid}\n")
+            # Пробуем прочитать PID файл (может не получиться если файл заблокирован)
+            if PID_FILE.exists():
+                with open(PID_FILE, 'r') as f:
+                    other_pid = f.read().strip()
         except:
+            pass
+        
+        # Если не удалось прочитать файл, ищем процесс через ps
+        if not other_pid:
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['pgrep', '-f', 'telegram_bot.py'],
+                    capture_output=True,
+                    text=True
+                )
+                pids = result.stdout.strip().split('\n')
+                if pids and pids[0]:
+                    other_pid = pids[0]
+            except:
+                pass
+        
+        # Выводим сообщение
+        if other_pid:
+            logger.error(f"❌ ОШИБКА: Другой экземпляр бота уже запущен (PID: {other_pid})")
+            print(f"\n❌ ОШИБКА: Другой экземпляр natrium-smm-bot уже запущен!")
+            print(f"   PID запущенного процесса: {other_pid}")
+            print(f"\nЧтобы остановить его, выполните:")
+            print(f"   sudo systemctl stop natrium-smm-bot")
+            print(f"   или: kill {other_pid}\n")
+        else:
             logger.error("❌ ОШИБКА: Другой экземпляр бота уже запущен")
-            print("\n❌ ОШИБКА: Другой экземпляр natrium-smm-bot уже запущен!\n")
+            print(f"\n❌ ОШИБКА: Другой экземпляр natrium-smm-bot уже запущен!")
+            print(f"   Используйте команду для остановки:")
+            print(f"   sudo systemctl stop natrium-smm-bot\n")
         
         return False
 
