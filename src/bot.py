@@ -1,8 +1,8 @@
 import os
-from openai import OpenAI
 from dotenv import load_dotenv
 from pathlib import Path
 import httpx
+import json
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -15,17 +15,16 @@ class NatriumBot:
         self.prompts_dir = Path(__file__).parent.parent / prompts_dir
         
         # Создаем HTTP клиент с увеличенным таймаутом (для длинных тем)
-        http_client = httpx.Client(
-            timeout=httpx.Timeout(120.0, connect=10.0),  # 120 секунд на ответ, 10 на подключение
+        self.http_client = httpx.Client(
+            timeout=httpx.Timeout(120.0, connect=10.0),
+            headers={
+                "Authorization": f"Api-Key {self.api_key}",
+                "x-folder-id": self.folder_id,
+                "Content-Type": "application/json"
+            }
         )
         
-        # Инициализация клиента OpenAI
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url="https://rest-assistant.api.cloud.yandex.net/v1",
-            project=self.folder_id,
-            http_client=http_client
-        )
+        self.base_url = "https://rest-assistant.api.cloud.yandex.net/v1"
     
     def _format_variables(self, variables: dict) -> str:
         """Форматирует переменные в строку для additional_instructions"""
@@ -182,25 +181,34 @@ class NatriumBot:
             # Безопасная обработка UTF-8 (удаляем суррогатные пары)
             input_text = input_text.encode('utf-8', errors='ignore').decode('utf-8')
 
-            response = self.client.responses.create(
-                prompt={
+            # Прямой REST API запрос к Yandex
+            payload = {
+                "prompt": {
                     "id": self.agent_id,
-                    "variables": variables
+                    "variables": variables or {}
                 },
-                input=input_text
+                "input": input_text
+            }
+            
+            response = self.http_client.post(
+                f"{self.base_url}/responses",
+                json=payload
             )
-
-            result = response.output_text
+            response.raise_for_status()
+            
+            data = response.json()
+            result = data.get("output_text", "")
 
             # Извлекаем usage данные (если доступны)
             usage = {}
-            if hasattr(response, 'usage'):
+            if "usage" in data:
+                usage_data = data["usage"]
                 usage = {
-                    'input_tokens': getattr(response.usage, 'input_tokens', 0),
-                    'output_tokens': getattr(response.usage, 'output_tokens', 0),
-                    'total_tokens': getattr(response.usage, 'total_tokens', 0),
-                    'input_tokens_details': getattr(response.usage, 'input_tokens_details', None),
-                    'output_tokens_details': getattr(response.usage, 'output_tokens_details', None)
+                    'input_tokens': usage_data.get('input_tokens', 0),
+                    'output_tokens': usage_data.get('output_tokens', 0),
+                    'total_tokens': usage_data.get('total_tokens', 0),
+                    'input_tokens_details': usage_data.get('input_tokens_details'),
+                    'output_tokens_details': usage_data.get('output_tokens_details')
                 }
 
             return result, usage
