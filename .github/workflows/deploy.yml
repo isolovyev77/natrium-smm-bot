@@ -59,7 +59,8 @@ jobs:
           
           # ====== Установка зависимостей ======
           echo "📚 Installing dependencies..."
-          venv/bin/pip install -r requirements.txt --quiet
+          venv/bin/pip install --upgrade pip
+          venv/bin/pip install -r requirements.txt --upgrade
           echo "✅ Dependencies installed"
           
           # ====== Перезапуск сервиса ======
