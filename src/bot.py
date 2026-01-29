@@ -197,7 +197,20 @@ class NatriumBot:
             response.raise_for_status()
             
             data = response.json()
+            print(f"🔍 DEBUG: API response keys: {data.keys()}")
+            print(f"🔍 DEBUG: Full response: {data}")
+            
             result = data.get("output_text", "")
+            
+            # Проверяем альтернативные поля для результата
+            if not result:
+                result = data.get("text", "")
+            if not result:
+                result = data.get("result", {}).get("text", "")
+            if not result:
+                result = data.get("content", "")
+                
+            print(f"🔍 DEBUG: Extracted result length: {len(result) if result else 0}")
 
             # Извлекаем usage данные (если доступны)
             usage = {}
