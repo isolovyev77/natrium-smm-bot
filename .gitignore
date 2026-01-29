@@ -1,69 +1,61 @@
-# Виртуальные окружения
-.venv/
-venv/
-env/
-ENV/
-.Python
-
-# Артефакты Python
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 *.so
-*.egg
-*.egg-info/
-dist/
+.Python
 build/
-*.sqlite3
-*.db
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Настройки IDE
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.DS_Store
-
-# Файлы окружения и секреты
-.env
-.env.*
-!.env.example
-config.local.py
-secrets/
-*.key
-*.pem
-credentials.json
-
-# Логи
-*.log
-logs/
-output/generated_posts*.md
-
-# Кэш pytest / coverage
-.pytest_cache/
-htmlcov/
-.coverage*
-.tox/
-.mypy_cache/
-.pytest_cache/
-.hypothesis/
-
-# Временные файлы
-*.tmp
-*.bak
-*.backup
-.cache/
 
 # OS
 .DS_Store
 Thumbs.db
-Desktop.ini
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# Logs
+*.log
+nohup.out
 
-# Документация (сгенерированная)
-docs/_build/
-site/
+# Backup files
+*.backup
+*.bak
+*.tar.gz
+*.zip
+
+# Output files (кроме архива)
+output/posts/*.md
+!output/posts/archive/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

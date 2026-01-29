@@ -270,7 +270,7 @@ def main():
         bot = NatriumBot()
     except ValueError as e:
         print(f"\n❌ Ошибка инициализации: {e}")
-        print("💡 Проверьте файл .env (YANDEX_AGENT_ID, YANDEX_API_KEY, YANDEX_FOLDER_ID)")
+        print("💡 Проверьте файл .env (YANDEX_AGENT_ID, YANDEX_CLOUD_API_KEY, YANDEX_FOLDER_ID)")
         return
 
     # 1. Выбор техники промптинга

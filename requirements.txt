@@ -9,8 +9,8 @@ PyMuPDF==1.24.1
 # Vector search (для File Search)
 faiss-cpu==1.8.0
 
-# Telegram bot (для будущей версии)
-python-telegram-bot==20.7
+# Telegram bot
+python-telegram-bot>=21.0
 
 # Testing
 pytest==7.4.3

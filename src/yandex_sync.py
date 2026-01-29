@@ -10,13 +10,13 @@ load_dotenv()
 
 class YandexFileSync:
     def __init__(self):
-        self.api_key = os.getenv('YANDEX_API_KEY')
+        self.api_key = os.getenv('YANDEX_CLOUD_API_KEY')
         self.folder_id = os.getenv('YANDEX_FOLDER_ID')
         self.agent_id = os.getenv('YANDEX_AGENT_ID')
         self.base_url = "https://api.yandexgpt.com/v1/fileSearch"
         
         if not self.api_key:
-            raise ValueError("YANDEX_API_KEY должен быть задан в .env файле")
+            raise ValueError("YANDEX_CLOUD_API_KEY должен быть задан в .env файле")
         
         if not self.folder_id:
             raise ValueError("YANDEX_FOLDER_ID должен быть задан в .env файле")

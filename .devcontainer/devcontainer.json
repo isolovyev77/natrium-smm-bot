@@ -1,0 +1,30 @@
+{
+  "name": "Natrium SMM Bot",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11"
+    }
+  },
+  
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ]
+    }
+  },
+  
+  "postCreateCommand": "pip install -r requirements.txt",
+  
+  "remoteEnv": {
+    "YANDEX_CLOUD_API_KEY": "${localEnv:YANDEX_CLOUD_API_KEY}",
+    "YANDEX_FOLDER_ID": "${localEnv:YANDEX_FOLDER_ID}",
+    "YANDEX_AGENT_ID": "${localEnv:YANDEX_AGENT_ID}",
+    "TELEGRAM_BOT_TOKEN": "${localEnv:TELEGRAM_BOT_TOKEN}"
+  },
+  
+  "forwardPorts": []
+}
