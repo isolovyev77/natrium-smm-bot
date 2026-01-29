@@ -27,6 +27,15 @@ class NatriumBot:
             http_client=http_client
         )
     
+    def _format_variables(self, variables: dict) -> str:
+        """Форматирует переменные в строку для additional_instructions"""
+        if not variables:
+            return ""
+        lines = ["Используй следующие переменные:"]
+        for key, value in variables.items():
+            lines.append(f"{key}: {value}")
+        return "\n".join(lines)
+    
 
     def generate_themes(self, technique: str = "cov+cok", custom_input: str = None) -> tuple:
         """Генерирует 10 тем (пустая USER_THEME)
@@ -173,22 +182,34 @@ class NatriumBot:
             # Безопасная обработка UTF-8 (удаляем суррогатные пары)
             input_text = input_text.encode('utf-8', errors='ignore').decode('utf-8')
 
-            response = self.client.responses.create(
-                prompt={
-                    "id": self.agent_id,
-                    "variables": variables
-                },
-                input=input_text
+            # Создаем thread
+            thread = self.client.beta.threads.create()
+            
+            # Добавляем сообщение в thread
+            self.client.beta.threads.messages.create(
+                thread_id=thread.id,
+                role="user",
+                content=input_text
             )
-
-            result = response.output_text
+            
+            # Запускаем ассистента
+            run = self.client.beta.threads.runs.create_and_poll(
+                thread_id=thread.id,
+                assistant_id=self.agent_id,
+                additional_instructions=self._format_variables(variables) if variables else None
+            )
+            
+            # Получаем ответ
+            messages = self.client.beta.threads.messages.list(thread_id=thread.id)
+            response_message = messages.data[0]
+            result = response_message.content[0].text.value
 
             # Извлекаем usage данные (если доступны)
             usage = {}
-            if hasattr(response, 'usage'):
+            if hasattr(run, 'usage') and run.usage:
                 usage = {
-                    'input_tokens': getattr(response.usage, 'input_tokens', 0),
-                    'output_tokens': getattr(response.usage, 'output_tokens', 0),
+                    'input_tokens': getattr(run.usage, 'prompt_tokens', 0),
+                    'output_tokens': getattr(run.usage, 'completion_tokens', 0),
                     'total_tokens': getattr(response.usage, 'total_tokens', 0),
                     'input_tokens_details': getattr(response.usage, 'input_tokens_details', None),
                     'output_tokens_details': getattr(response.usage, 'output_tokens_details', None)
