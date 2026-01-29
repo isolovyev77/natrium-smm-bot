@@ -3,6 +3,10 @@ from dotenv import load_dotenv
 from pathlib import Path
 import httpx
 import json
+import logging
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -197,8 +201,8 @@ class NatriumBot:
             response.raise_for_status()
             
             data = response.json()
-            print(f"🔍 DEBUG: API response keys: {data.keys()}")
-            print(f"🔍 DEBUG: Full response: {data}")
+            logger.info(f"🔍 DEBUG: API response keys: {data.keys()}")
+            logger.info(f"🔍 DEBUG: Full response: {data}")
             
             result = data.get("output_text", "")
             
@@ -210,7 +214,7 @@ class NatriumBot:
             if not result:
                 result = data.get("content", "")
                 
-            print(f"🔍 DEBUG: Extracted result length: {len(result) if result else 0}")
+            logger.info(f"🔍 DEBUG: Extracted result length: {len(result) if result else 0}")
 
             # Извлекаем usage данные (если доступны)
             usage = {}
@@ -227,5 +231,5 @@ class NatriumBot:
             return result, usage
 
         except Exception as e:
-            print(f"❌ ОШИБКА API: {e}")
+            logger.error(f"❌ ОШИБКА API: {e}")
             raise
