@@ -1,6 +1,8 @@
 import os
 import sys
 import logging
+import atexit
+import fcntl
 from pathlib import Path
 
 # Добавляем корневую директорию в путь
@@ -17,6 +19,72 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# PID файл для предотвращения множественных запусков
+PID_FILE = Path("/tmp/natrium-smm-bot.pid")
+LOCK_FILE = None
+
+
+def acquire_lock():
+    """Получить эксклюзивную блокировку для предотвращения множественных запусков"""
+    global LOCK_FILE
+    
+    try:
+        # Открываем файл блокировки
+        LOCK_FILE = open(PID_FILE, 'w')
+        
+        # Пытаемся получить эксклюзивную блокировку (неблокирующий режим)
+        fcntl.flock(LOCK_FILE.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        
+        # Записываем PID текущего процесса
+        LOCK_FILE.write(str(os.getpid()))
+        LOCK_FILE.flush()
+        
+        logger.info(f"🔒 Блокировка получена, PID: {os.getpid()}")
+        return True
+        
+    except IOError:
+        # Не удалось получить блокировку - другой экземпляр уже запущен
+        if LOCK_FILE:
+            LOCK_FILE.close()
+        
+        # Читаем PID другого процесса
+        try:
+            with open(PID_FILE, 'r') as f:
+                other_pid = f.read().strip()
+                logger.error(f"❌ ОШИБКА: Другой экземпляр бота уже запущен (PID: {other_pid})")
+                print(f"\n❌ ОШИБКА: Другой экземпляр natrium-smm-bot уже запущен!")
+                print(f"   PID запущенного процесса: {other_pid}")
+                print(f"\nЧтобы остановить его, выполните:")
+                print(f"   sudo systemctl stop natrium-smm-bot")
+                print(f"   или: kill {other_pid}\n")
+        except:
+            logger.error("❌ ОШИБКА: Другой экземпляр бота уже запущен")
+            print("\n❌ ОШИБКА: Другой экземпляр natrium-smm-bot уже запущен!\n")
+        
+        return False
+
+
+def release_lock():
+    """Освободить блокировку при выходе"""
+    global LOCK_FILE
+    
+    if LOCK_FILE:
+        try:
+            fcntl.flock(LOCK_FILE.fileno(), fcntl.LOCK_UN)
+            LOCK_FILE.close()
+            
+            # Удаляем PID файл
+            if PID_FILE.exists():
+                PID_FILE.unlink()
+            
+            logger.info("🔓 Блокировка освобождена")
+        except Exception as e:
+            logger.error(f"Ошибка освобождения блокировки: {e}")
+
+
+# Регистрируем функцию очистки при выходе
+atexit.register(release_lock)
 
 
 class TelegramSMMBot:
@@ -572,8 +640,16 @@ class TelegramSMMBot:
 
 
 if __name__ == "__main__":
+    # Проверяем блокировку перед запуском
+    if not acquire_lock():
+        sys.exit(1)
+    
     try:
         bot = TelegramSMMBot()
         bot.run()
+    except KeyboardInterrupt:
+        logger.info("⚠️ Получен сигнал остановки (Ctrl+C)")
     except Exception as e:
         logger.error(f"❌ Ошибка запуска бота: {e}")
+    finally:
+        release_lock()
