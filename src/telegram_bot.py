@@ -877,6 +877,22 @@ class TelegramSMMBot:
             
             logger.info(f"Wrapped sources in parentheses (ВОЗ, PubMed, Исследования, crossfit.com)")
             
+            # КРИТИЧЕСКИ ВАЖНО: Удаляем артефакты рассуждений модели после хештегов
+            # Ищем последнюю строку с хештегами (начинается с #)
+            lines = post.split('\n')
+            last_hashtag_index = -1
+            for i in range(len(lines) - 1, -1, -1):
+                stripped = lines[i].strip()
+                if stripped and stripped.startswith('#'):
+                    last_hashtag_index = i
+                    break
+            
+            # Если нашли хештеги, обрезаем все что после них
+            if last_hashtag_index >= 0:
+                # Берем только строки до хештегов включительно
+                post = '\n'.join(lines[:last_hashtag_index + 1])
+                logger.info(f"Removed reasoning artifacts after hashtags (line {last_hashtag_index})")
+            
             # КРИТИЧЕСКИ ВАЖНО: Конвертируем Markdown в HTML для Telegram
             # Яндекс генерирует ссылки в формате [текст](URL)
             # Telegram с parse_mode='HTML' требует <a href="URL">текст</a>
