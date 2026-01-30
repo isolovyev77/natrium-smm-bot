@@ -856,12 +856,29 @@ class TelegramSMMBot:
             # КРИТИЧЕСКИ ВАЖНО: Удаляем шаги рассуждений модели
             # МЕТОД 1: Ищем маркер "ГОТОВЫЙ ПОСТ:"
             # МЕТОД 2: Ищем строку с эмодзи поста (💪🧠💤🔥⚡️💓🍽️) + ** + CAPS
+            # МЕТОД 3: Удаляем строки с артефактами рассуждений
             
             lines = post.split('\n')
             post_start_index = None
             
             # Эмодзи заголовков постов (НЕ путать с 🔄 🏋️ из рассуждений)
             post_emojis = ['💪', '🧠', '💤', '🔥', '⚡️', '💓', '🍽️', '🏃', '⚡', '📊', '🎯']
+            
+            # Артефакты рассуждений (удаляем эти строки ПОЛНОСТЬЮ)
+            reasoning_markers = [
+                '🔄 Сначала мне нужно',
+                '[Вызов функции',
+                'search_index',
+                'web_search',
+                'FileSearch',
+                'Web Search',
+                'ГЕНЕРИРУЮ',
+                'Шаг 1',
+                'Шаг 2',
+                'Шаг 3',
+                'для поиска',
+                'с запросом'
+            ]
             
             # МЕТОД 1: Ищем маркер "ГОТОВЫЙ ПОСТ:"
             for i, line in enumerate(lines):
@@ -877,8 +894,8 @@ class TelegramSMMBot:
                     if not stripped or len(stripped) < 10:
                         continue
                     
-                    # Пропускаем рассуждения: "ГЕНЕРИРУЮ", "Шаг", "FileSearch", "Web Search", JSON
-                    if any(x in stripped for x in ['ГЕНЕРИРУЮ', 'Шаг', 'FileSearch', 'Web Search']):
+                    # Пропускаем рассуждения
+                    if any(marker in stripped for marker in reasoning_markers):
                         continue
                     if stripped.startswith('{'):
                         continue
