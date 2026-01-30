@@ -7,6 +7,29 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.bot import NatriumBot
 
 
+# Глобальные настройки и счетчики
+SETTINGS = {
+    'show_token_stats': True  # по умолчанию включено
+}
+
+SESSION_STATS = {
+    'total_input_tokens': 0,
+    'total_output_tokens': 0,
+    'total_cached_tokens': 0,
+    'total_reasoning_tokens': 0,
+    'total_requests': 0,
+    'total_tokens': 0
+}
+
+# Тарифы Yandex Cloud GPT (руб. за 1000 токенов, примерные)
+# Обновите актуальные цены на https://yandex.cloud/ru/docs/yandexgpt/pricing
+PRICING = {
+    'input': 0.0012,      # за 1000 токенов
+    'output': 0.0012,     # за 1000 токенов
+    'cached': 0.0006      # за 1000 токенов (примерно в 2 раза дешевле)
+}
+
+
 def clear_screen():
     """Очищает экран (опционально)"""
     # os.system('clear' if os.name == 'posix' else 'cls')
@@ -19,7 +42,11 @@ def print_separator():
 
 
 def print_token_usage(operation: str, usage: dict):
-    """Печатает статистику использования токенов"""
+    """Печатает статистику использования токенов с накопительными данными"""
+    # Проверяем настройку
+    if not SETTINGS.get('show_token_stats', True):
+        return
+
     if not usage:
         return
 
@@ -27,25 +54,149 @@ def print_token_usage(operation: str, usage: dict):
     output_tokens = usage.get('output_tokens', 0)
     total_tokens = usage.get('total_tokens', 0)
 
-    print("\n" + "-"*70)
-    print(f"📊 {operation}")
-    print(f"Tokens in/out/total: {input_tokens}+{output_tokens}={total_tokens}")
-
-    # Выводим дополнительные детали если есть
+    # Получаем детали
     input_details = usage.get('input_tokens_details')
     output_details = usage.get('output_tokens_details')
 
+    cached_tokens = 0
     if input_details:
-        cached = getattr(input_details, 'cached_tokens', 0) if hasattr(input_details, 'cached_tokens') else input_details.get('cached_tokens', 0)
-        if cached > 0:
-            print(f"   └─ cached: {cached} токенов")
+        cached_tokens = getattr(input_details, 'cached_tokens', 0) if hasattr(input_details, 'cached_tokens') else input_details.get('cached_tokens', 0)
 
+    reasoning_tokens = 0
     if output_details:
-        reasoning = getattr(output_details, 'reasoning_tokens', 0) if hasattr(output_details, 'reasoning_tokens') else output_details.get('reasoning_tokens', 0)
-        if reasoning > 0:
-            print(f"   └─ reasoning: {reasoning} токенов")
+        reasoning_tokens = getattr(output_details, 'reasoning_tokens', 0) if hasattr(output_details, 'reasoning_tokens') else output_details.get('reasoning_tokens', 0)
+
+    # Обновляем накопительную статистику
+    SESSION_STATS['total_input_tokens'] += input_tokens
+    SESSION_STATS['total_output_tokens'] += output_tokens
+    SESSION_STATS['total_cached_tokens'] += cached_tokens
+    SESSION_STATS['total_reasoning_tokens'] += reasoning_tokens
+    SESSION_STATS['total_requests'] += 1
+    SESSION_STATS['total_tokens'] += total_tokens
+
+    # Расчет стоимости текущего запроса
+    cost_input = (input_tokens - cached_tokens) / 1000 * PRICING['input']
+    cost_cached = cached_tokens / 1000 * PRICING['cached']
+    cost_output = output_tokens / 1000 * PRICING['output']
+    total_cost = cost_input + cost_cached + cost_output
+
+    # Вывод статистики
+    print("\n" + "-"*70)
+    print(f"📊 {operation}")
+    print("-"*70)
+    print(f"\n🔢 Токены текущего запроса:")
+    print(f"   ├─ Входные:   {input_tokens:>6} токенов")
+    if cached_tokens > 0:
+        cache_percent = (cached_tokens / input_tokens * 100) if input_tokens > 0 else 0
+        print(f"   │  └─ из кеша: {cached_tokens:>6} токенов ({cache_percent:.1f}% 💾)")
+    print(f"   ├─ Выходные:  {output_tokens:>6} токенов")
+    if reasoning_tokens > 0:
+        print(f"   │  └─ reasoning: {reasoning_tokens:>6} токенов")
+    print(f"   └─ Всего:     {total_tokens:>6} токенов")
+
+    # Соотношение input/output
+    if output_tokens > 0:
+        ratio = input_tokens / output_tokens
+        print(f"\n📈 Соотношение in/out: {ratio:.2f}:1", end="")
+        if ratio > 5:
+            print(" (много контекста)")
+        elif ratio < 1:
+            print(" (длинная генерация)")
+        else:
+            print(" (оптимально)")
+
+    # Стоимость
+    print(f"\n💰 Стоимость запроса: ~{total_cost:.4f} ₽", end="")
+    if cached_tokens > 0:
+        saved = (cached_tokens / 1000 * (PRICING['input'] - PRICING['cached']))
+        print(f" (экономия на кеше: {saved:.4f} ₽)")
+    else:
+        print()
+
+    # Накопительная статистика
+    total_session_cost = (
+        (SESSION_STATS['total_input_tokens'] - SESSION_STATS['total_cached_tokens']) / 1000 * PRICING['input'] +
+        SESSION_STATS['total_cached_tokens'] / 1000 * PRICING['cached'] +
+        SESSION_STATS['total_output_tokens'] / 1000 * PRICING['output']
+    )
+
+    print(f"\n📦 Статистика сессии (запросов: {SESSION_STATS['total_requests']}):")
+    print(f"   ├─ Всего токенов: {SESSION_STATS['total_tokens']:>6}")
+    print(f"   ├─ Входные:       {SESSION_STATS['total_input_tokens']:>6}")
+    if SESSION_STATS['total_cached_tokens'] > 0:
+        cache_percent_total = (SESSION_STATS['total_cached_tokens'] / SESSION_STATS['total_input_tokens'] * 100) if SESSION_STATS['total_input_tokens'] > 0 else 0
+        print(f"   │  └─ из кеша:    {SESSION_STATS['total_cached_tokens']:>6} ({cache_percent_total:.1f}% 💾)")
+    print(f"   ├─ Выходные:      {SESSION_STATS['total_output_tokens']:>6}")
+    print(f"   └─ Стоимость:     ~{total_session_cost:.4f} ₽")
 
     print("-"*70 + "\n")
+
+
+def show_settings_menu():
+    """Показывает меню настроек"""
+    while True:
+        print("\n" + "="*70)
+        print("⚙️  НАСТРОЙКИ БОТА")
+        print("="*70)
+        print("\n1. Вывод статистики токенов:" + (" ✅ Включен" if SETTINGS['show_token_stats'] else " ❌ Выключен"))
+        print("2. Сбросить счетчики сессии")
+        print("3. Показать текущую статистику сессии")
+        print("0. Вернуться в главное меню")
+
+        choice = input("\nВведите номер (0-3): ").strip()
+        choice = choice.encode('utf-8', errors='ignore').decode('utf-8').strip()
+
+        if choice == '1':
+            SETTINGS['show_token_stats'] = not SETTINGS['show_token_stats']
+            status = "включен" if SETTINGS['show_token_stats'] else "выключен"
+            print(f"\n✅ Вывод статистики токенов {status}")
+
+        elif choice == '2':
+            SESSION_STATS['total_input_tokens'] = 0
+            SESSION_STATS['total_output_tokens'] = 0
+            SESSION_STATS['total_cached_tokens'] = 0
+            SESSION_STATS['total_reasoning_tokens'] = 0
+            SESSION_STATS['total_requests'] = 0
+            SESSION_STATS['total_tokens'] = 0
+            print("\n✅ Счетчики сессии сброшены")
+
+        elif choice == '3':
+            print("\n" + "-"*70)
+            print("📊 СТАТИСТИКА ТЕКУЩЕЙ СЕССИИ")
+            print("-"*70)
+            if SESSION_STATS['total_requests'] == 0:
+                print("\n⚠️ Запросов ещё не было")
+            else:
+                total_cost = (
+                    (SESSION_STATS['total_input_tokens'] - SESSION_STATS['total_cached_tokens']) / 1000 * PRICING['input'] +
+                    SESSION_STATS['total_cached_tokens'] / 1000 * PRICING['cached'] +
+                    SESSION_STATS['total_output_tokens'] / 1000 * PRICING['output']
+                )
+                cache_percent = (SESSION_STATS['total_cached_tokens'] / SESSION_STATS['total_input_tokens'] * 100) if SESSION_STATS['total_input_tokens'] > 0 else 0
+                avg_tokens_per_request = SESSION_STATS['total_tokens'] / SESSION_STATS['total_requests']
+
+                print(f"\n📦 Запросов выполнено: {SESSION_STATS['total_requests']}")
+                print(f"\n🔢 Токены:")
+                print(f"   ├─ Всего:         {SESSION_STATS['total_tokens']:>6}")
+                print(f"   ├─ Входные:       {SESSION_STATS['total_input_tokens']:>6}")
+                print(f"   │  └─ из кеша:    {SESSION_STATS['total_cached_tokens']:>6} ({cache_percent:.1f}% 💾)")
+                print(f"   ├─ Выходные:      {SESSION_STATS['total_output_tokens']:>6}")
+                if SESSION_STATS['total_reasoning_tokens'] > 0:
+                    print(f"   │  └─ reasoning:   {SESSION_STATS['total_reasoning_tokens']:>6}")
+                print(f"   └─ Средне/запрос: {avg_tokens_per_request:>6.0f}")
+                print(f"\n💰 Общая стоимость: ~{total_cost:.4f} ₽")
+                if SESSION_STATS['total_cached_tokens'] > 0:
+                    saved = (SESSION_STATS['total_cached_tokens'] / 1000 * (PRICING['input'] - PRICING['cached']))
+                    print(f"   └─ Экономия на кеше: ~{saved:.4f} ₽")
+            print("-"*70)
+            input("\nНажмите Enter для продолжения...")
+
+        elif choice == '0':
+            print("\n↩️ Возврат в главное меню...")
+            break
+
+        else:
+            print("❌ Ошибка: введите 0, 1, 2 или 3")
 
 
 def get_technique_choice():
@@ -246,17 +397,18 @@ def get_next_action():
     print("2. Сгенерировать новый пост на эту же тему")
     print("3. Сгенерировать пост на другую тему (из текущего списка)")
     print("4. Сгенерировать новый список тем")
+    print("5. Настройки ⚙️")
 
     while True:
-        choice = input("\nВведите номер (1-4): ").strip()
+        choice = input("\nВведите номер (1-5): ").strip()
 
         # Безопасная очистка UTF-8
         choice = choice.encode('utf-8', errors='ignore').decode('utf-8').strip()
 
-        if choice in ['1', '2', '3', '4']:
+        if choice in ['1', '2', '3', '4', '5']:
             return choice
         else:
-            print("❌ Ошибка: введите 1, 2, 3 или 4")
+            print("❌ Ошибка: введите 1, 2, 3, 4 или 5")
 
 
 def main():
@@ -398,6 +550,11 @@ def main():
                 print_separator()
                 themes = generate_themes(bot, technique, focus)
                 break  # выход из внутреннего цикла while True
+
+            elif next_action == '5':
+                # Настройки — показываем меню настроек и остаёмся в цикле
+                show_settings_menu()
+                # Остаёмся в внутреннем цикле — покажем меню снова
 
 
 if __name__ == "__main__":
