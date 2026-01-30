@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 PID_FILE = Path("/tmp/natrium-smm-bot.pid")
 LOCK_FILE = None
 
+# Глобальные настройки и счетчики (для каждого пользователя)
+USER_SETTINGS = {}  # {user_id: {'show_token_stats': True}}
+USER_SESSION_STATS = {}  # {user_id: {...}}
+
+# Тарифы Yandex Cloud GPT (руб. за 1000 токенов)
+PRICING = {
+    'input': 0.0012,
+    'output': 0.0012,
+    'cached': 0.0006
+}
+
 
 def acquire_lock():
     """Получить эксклюзивную блокировку для предотвращения множественных запусков"""
@@ -112,6 +123,113 @@ def release_lock():
 atexit.register(release_lock)
 
 
+def get_user_settings(user_id: int) -> dict:
+    """Получить настройки пользователя"""
+    if user_id not in USER_SETTINGS:
+        USER_SETTINGS[user_id] = {'show_token_stats': True}
+    return USER_SETTINGS[user_id]
+
+
+def get_user_stats(user_id: int) -> dict:
+    """Получить статистику сессии пользователя"""
+    if user_id not in USER_SESSION_STATS:
+        USER_SESSION_STATS[user_id] = {
+            'total_input_tokens': 0,
+            'total_output_tokens': 0,
+            'total_cached_tokens': 0,
+            'total_reasoning_tokens': 0,
+            'total_requests': 0,
+            'total_tokens': 0
+        }
+    return USER_SESSION_STATS[user_id]
+
+
+def format_token_stats(operation: str, usage: dict, user_id: int) -> str:
+    """Форматирует статистику токенов для отправки в Telegram"""
+    if not usage:
+        return ""
+
+    input_tokens = usage.get('input_tokens', 0)
+    output_tokens = usage.get('output_tokens', 0)
+    total_tokens = usage.get('total_tokens', 0)
+
+    # Получаем детали
+    input_details = usage.get('input_tokens_details')
+    output_details = usage.get('output_tokens_details')
+
+    cached_tokens = 0
+    if input_details:
+        cached_tokens = getattr(input_details, 'cached_tokens', 0) if hasattr(input_details, 'cached_tokens') else input_details.get('cached_tokens', 0)
+
+    reasoning_tokens = 0
+    if output_details:
+        reasoning_tokens = getattr(output_details, 'reasoning_tokens', 0) if hasattr(output_details, 'reasoning_tokens') else output_details.get('reasoning_tokens', 0)
+
+    # Обновляем накопительную статистику
+    stats = get_user_stats(user_id)
+    stats['total_input_tokens'] += input_tokens
+    stats['total_output_tokens'] += output_tokens
+    stats['total_cached_tokens'] += cached_tokens
+    stats['total_reasoning_tokens'] += reasoning_tokens
+    stats['total_requests'] += 1
+    stats['total_tokens'] += total_tokens
+
+    # Расчет стоимости текущего запроса
+    cost_input = (input_tokens - cached_tokens) / 1000 * PRICING['input']
+    cost_cached = cached_tokens / 1000 * PRICING['cached']
+    cost_output = output_tokens / 1000 * PRICING['output']
+    total_cost = cost_input + cost_cached + cost_output
+
+    # Формируем текст статистики
+    text = f"📊 *{operation}*\n"
+    text += f"\n🔢 *Токены текущего запроса:*\n"
+    text += f"   • Входные: {input_tokens}\n"
+    if cached_tokens > 0:
+        cache_percent = (cached_tokens / input_tokens * 100) if input_tokens > 0 else 0
+        text += f"      └ из кеша: {cached_tokens} ({cache_percent:.1f}% 💾)\n"
+    text += f"   • Выходные: {output_tokens}\n"
+    if reasoning_tokens > 0:
+        text += f"      └ reasoning: {reasoning_tokens}\n"
+    text += f"   • Всего: {total_tokens}\n"
+
+    # Соотношение input/output
+    if output_tokens > 0:
+        ratio = input_tokens / output_tokens
+        text += f"\n📈 *Соотношение in/out:* {ratio:.2f}:1"
+        if ratio > 5:
+            text += " (много контекста)\n"
+        elif ratio < 1:
+            text += " (длинная генерация)\n"
+        else:
+            text += " (оптимально)\n"
+
+    # Стоимость
+    text += f"\n💰 *Стоимость запроса:* ~{total_cost:.4f} ₽"
+    if cached_tokens > 0:
+        saved = (cached_tokens / 1000 * (PRICING['input'] - PRICING['cached']))
+        text += f" (экономия: {saved:.4f} ₽)\n"
+    else:
+        text += "\n"
+
+    # Накопительная статистика
+    total_session_cost = (
+        (stats['total_input_tokens'] - stats['total_cached_tokens']) / 1000 * PRICING['input'] +
+        stats['total_cached_tokens'] / 1000 * PRICING['cached'] +
+        stats['total_output_tokens'] / 1000 * PRICING['output']
+    )
+
+    text += f"\n📦 *Статистика сессии* (запросов: {stats['total_requests']}): \n"
+    text += f"   • Всего токенов: {stats['total_tokens']}\n"
+    text += f"   • Входные: {stats['total_input_tokens']}\n"
+    if stats['total_cached_tokens'] > 0:
+        cache_percent_total = (stats['total_cached_tokens'] / stats['total_input_tokens'] * 100) if stats['total_input_tokens'] > 0 else 0
+        text += f"      └ из кеша: {stats['total_cached_tokens']} ({cache_percent_total:.1f}% 💾)\n"
+    text += f"   • Выходные: {stats['total_output_tokens']}\n"
+    text += f"   • Стоимость: ~{total_session_cost:.4f} ₽\n"
+
+    return text
+
+
 class TelegramSMMBot:
     def __init__(self):
         if not TELEGRAM_BOT_TOKEN:
@@ -120,9 +238,12 @@ class TelegramSMMBot:
         self.natrium_bot = NatriumBot()
         self.application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
         
-        # Постоянная клавиатура с кнопкой /start
+        # Постоянная клавиатура с кнопками
         self.main_keyboard = ReplyKeyboardMarkup(
-            [[KeyboardButton("🔄 Начать заново")]],
+            [
+                [KeyboardButton("🔄 Начать заново")],
+                [KeyboardButton("⚙️ Настройки")]
+            ],
             resize_keyboard=True,
             one_time_keyboard=False
         )
@@ -361,14 +482,13 @@ class TelegramSMMBot:
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(themes_text, reply_markup=reply_markup, parse_mode='Markdown')
                 
-                # if usage:
-                #     stats = (
-                #         f"📊 **Статистика:**\n"
-                #         f"• Входных токенов: {usage.get('input_tokens', 0)}\n"
-                #         f"• Выходных токенов: {usage.get('output_tokens', 0)}\n"
-                #         f"• Всего: {usage.get('total_tokens', 0)}"
-                #     )
-                #     await query.message.reply_text(stats, parse_mode='Markdown')
+                # Отправляем статистику, если включена
+                if usage:
+                    user_id = query.from_user.id
+                    settings = get_user_settings(user_id)
+                    if settings['show_token_stats']:
+                        stats_text = format_token_stats("Генерация тем", usage, user_id)
+                        await query.message.reply_text(stats_text, parse_mode='Markdown')
                     
             except Exception as e:
                 logger.error(f"Ошибка генерации тем: {e}")
@@ -382,6 +502,73 @@ class TelegramSMMBot:
                 parse_mode='Markdown'
             )
             context.user_data.clear()
+        
+        # Настройки
+        elif data == "settings":
+            await self.show_settings_menu(query, context)
+        
+        # Переключение вывода статистики токенов
+        elif data == "toggle_stats":
+            user_id = query.from_user.id
+            settings = get_user_settings(user_id)
+            settings['show_token_stats'] = not settings['show_token_stats']
+            await self.show_settings_menu(query, context)
+        
+        # Сброс счетчиков сессии
+        elif data == "reset_stats":
+            user_id = query.from_user.id
+            USER_SESSION_STATS[user_id] = {
+                'total_input_tokens': 0,
+                'total_output_tokens': 0,
+                'total_cached_tokens': 0,
+                'total_reasoning_tokens': 0,
+                'total_requests': 0,
+                'total_tokens': 0
+            }
+            await query.answer("✅ Счетчики сессии сброшены", show_alert=True)
+            await self.show_settings_menu(query, context)
+        
+        # Показать текущую статистику сессии
+        elif data == "view_stats":
+            user_id = query.from_user.id
+            stats = get_user_stats(user_id)
+            
+            if stats['total_requests'] == 0:
+                await query.answer("⚠️ Запросов ещё не было", show_alert=True)
+            else:
+                total_cost = (
+                    (stats['total_input_tokens'] - stats['total_cached_tokens']) / 1000 * PRICING['input'] +
+                    stats['total_cached_tokens'] / 1000 * PRICING['cached'] +
+                    stats['total_output_tokens'] / 1000 * PRICING['output']
+                )
+                cache_percent = (stats['total_cached_tokens'] / stats['total_input_tokens'] * 100) if stats['total_input_tokens'] > 0 else 0
+                avg_tokens = stats['total_tokens'] / stats['total_requests']
+                
+                stats_text = f"📊 *СТАТИСТИКА СЕССИИ*\n\n"
+                stats_text += f"📦 *Запросов:* {stats['total_requests']}\n\n"
+                stats_text += f"🔢 *Токены:*\n"
+                stats_text += f"   • Всего: {stats['total_tokens']}\n"
+                stats_text += f"   • Входные: {stats['total_input_tokens']}\n"
+                stats_text += f"      └ из кеша: {stats['total_cached_tokens']} ({cache_percent:.1f}% 💾)\n"
+                stats_text += f"   • Выходные: {stats['total_output_tokens']}\n"
+                if stats['total_reasoning_tokens'] > 0:
+                    stats_text += f"      └ reasoning: {stats['total_reasoning_tokens']}\n"
+                stats_text += f"   • Средне/запрос: {avg_tokens:.0f}\n\n"
+                stats_text += f"💰 *Общая стоимость:* ~{total_cost:.4f} ₽\n"
+                if stats['total_cached_tokens'] > 0:
+                    saved = (stats['total_cached_tokens'] / 1000 * (PRICING['input'] - PRICING['cached']))
+                    stats_text += f"   └ Экономия на кеше: ~{saved:.4f} ₽"
+                
+                await query.answer()
+                await query.message.reply_text(stats_text, parse_mode='Markdown')
+        
+        # Закрыть настройки
+        elif data == "close_settings":
+            await query.edit_message_text(
+                "⚙️ Настройки закрыты.\n\n"
+                "Используйте кнопку *⚙️ Настройки* для повторного открытия.",
+                parse_mode='Markdown'
+            )
 
     async def text_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик текстовых сообщений"""
@@ -391,6 +578,11 @@ class TelegramSMMBot:
         if text == "🔄 Начать заново":
             context.user_data.clear()
             await self.start_command(update, context)
+            return
+        
+        # Обработка кнопки "Настройки"
+        if text == "⚙️ Настройки":
+            await self.show_settings_menu_message(update, context)
             return
         
         # Проверяем, выбрана ли техника
@@ -427,6 +619,52 @@ class TelegramSMMBot:
                 reply_markup=self.main_keyboard
             )
 
+    async def show_settings_menu(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """Показывает меню настроек (callback version)"""
+        user_id = query.from_user.id
+        settings = get_user_settings(user_id)
+        
+        status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
+        
+        text = f"⚙️ *НАСТРОЙКИ БОТА*\n\n"
+        text += f"📊 *Вывод статистики токенов:* {status}\n"
+        
+        keyboard = [
+            [InlineKeyboardButton(
+                "🔄 Переключить статистику" if settings['show_token_stats'] else "✅ Включить статистику",
+                callback_data="toggle_stats"
+            )],
+            [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
+            [InlineKeyboardButton("📊 Показать статистику сессии", callback_data="view_stats")],
+            [InlineKeyboardButton("✖️ Закрыть", callback_data="close_settings")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    async def show_settings_menu_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показывает меню настроек (message version)"""
+        user_id = update.effective_user.id
+        settings = get_user_settings(user_id)
+        
+        status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
+        
+        text = f"⚙️ *НАСТРОЙКИ БОТА*\n\n"
+        text += f"📊 *Вывод статистики токенов:* {status}\n"
+        
+        keyboard = [
+            [InlineKeyboardButton(
+                "🔄 Переключить статистику" if settings['show_token_stats'] else "✅ Включить статистику",
+                callback_data="toggle_stats"
+            )],
+            [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
+            [InlineKeyboardButton("📊 Показать статистику сессии", callback_data="view_stats")],
+            [InlineKeyboardButton("✖️ Закрыть", callback_data="close_settings")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
     def parse_themes_list(self, themes_text: str) -> list:
         """Парсит список тем из текста (берет последние 10 если есть дубликаты)"""
         import re
@@ -626,15 +864,14 @@ class TelegramSMMBot:
                 parse_mode='Markdown'
             )
             
-            # # Статистика (закомментировано)
-            # if usage:
-            #     stats = (
-            #         f"📊 **Статистика:**\n"
-            #         f"• Входных токенов: {usage.get('input_tokens', 0)}\n"
-            #         f"• Выходных токенов: {usage.get('output_tokens', 0)}\n"
-            #         f"• Всего: {usage.get('total_tokens', 0)}"
-            #     )
-            #     await query.message.reply_text(stats, parse_mode='Markdown')
+            # Отправляем статистику, если включена
+            if usage:
+                # Получаем user_id из context (query.from_user может быть недоступен)
+                user_id = query.from_user.id
+                settings = get_user_settings(user_id)
+                if settings['show_token_stats']:
+                    stats_text = format_token_stats("Генерация поста", usage, user_id)
+                    await query.message.reply_text(stats_text, parse_mode='Markdown')
             
             # Меню действий (используем короткие callback без темы)
             keyboard = [
