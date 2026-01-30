@@ -123,6 +123,43 @@ def release_lock():
 atexit.register(release_lock)
 
 
+def convert_markdown_to_html(text: str) -> str:
+    """
+    Конвертирует Markdown форматирование в HTML для Telegram
+    
+    Поддерживаемые преобразования:
+    - [текст](URL) → <a href="URL">текст</a>
+    - **текст** → <b>текст</b>
+    - *текст* → <i>текст</i>
+    
+    Args:
+        text: Текст с Markdown форматированием
+        
+    Returns:
+        Текст с HTML форматированием
+    """
+    import re
+    
+    # 1. Конвертируем ссылки: [текст](URL) → <a href="URL">текст</a>
+    # Паттерн для поиска Markdown ссылок
+    text = re.sub(
+        r'\[([^\]]+)\]\(([^)]+)\)',
+        r'<a href="\2">\1</a>',
+        text
+    )
+    
+    # 2. Конвертируем жирный текст: **текст** → <b>текст</b>
+    # Важно: делать это ПОСЛЕ конвертации ссылок, чтобы не сломать паттерны
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    
+    # 3. Конвертируем курсив: *текст* → <i>текст</i>
+    # Но НЕ трогаем одинарные * в начале строки (буллеты)
+    # Паттерн: * не в начале строки, окруженный текстом с обеих сторон
+    text = re.sub(r'(?<!^)(?<!\n)\*([^*\n]+?)\*', r'<i>\1</i>', text, flags=re.MULTILINE)
+    
+    return text
+
+
 def get_user_settings(user_id: int) -> dict:
     """Получить настройки пользователя"""
     if user_id not in USER_SETTINGS:
@@ -145,7 +182,7 @@ def get_user_stats(user_id: int) -> dict:
 
 
 def format_token_stats(operation: str, usage: dict, user_id: int) -> str:
-    """Форматирует статистику токенов для отправки в Telegram"""
+    """Форматирует статистику токенов для отправки в Telegram (HTML формат)"""
     if not usage:
         return ""
 
@@ -180,9 +217,9 @@ def format_token_stats(operation: str, usage: dict, user_id: int) -> str:
     cost_output = output_tokens / 1000 * PRICING['output']
     total_cost = cost_input + cost_cached + cost_output
 
-    # Формируем текст статистики
-    text = f"📊 *{operation}*\n"
-    text += f"\n🔢 *Токены текущего запроса:*\n"
+    # Формируем текст статистики в HTML формате
+    text = f"📊 <b>{operation}</b>\n"
+    text += f"\n🔢 <b>Токены текущего запроса:</b>\n"
     text += f"   • Входные: {input_tokens}\n"
     if cached_tokens > 0:
         cache_percent = (cached_tokens / input_tokens * 100) if input_tokens > 0 else 0
@@ -195,7 +232,7 @@ def format_token_stats(operation: str, usage: dict, user_id: int) -> str:
     # Соотношение input/output
     if output_tokens > 0:
         ratio = input_tokens / output_tokens
-        text += f"\n📈 *Соотношение in/out:* {ratio:.2f}:1"
+        text += f"\n📈 <b>Соотношение in/out:</b> {ratio:.2f}:1"
         if ratio > 5:
             text += " (много контекста)\n"
         elif ratio < 1:
@@ -204,7 +241,7 @@ def format_token_stats(operation: str, usage: dict, user_id: int) -> str:
             text += " (оптимально)\n"
 
     # Стоимость
-    text += f"\n💰 *Стоимость запроса:* ~{total_cost:.4f} ₽"
+    text += f"\n💰 <b>Стоимость запроса:</b> ~{total_cost:.4f} ₽"
     if cached_tokens > 0:
         saved = (cached_tokens / 1000 * (PRICING['input'] - PRICING['cached']))
         text += f" (экономия: {saved:.4f} ₽)\n"
@@ -218,7 +255,7 @@ def format_token_stats(operation: str, usage: dict, user_id: int) -> str:
         stats['total_output_tokens'] / 1000 * PRICING['output']
     )
 
-    text += f"\n📦 *Статистика сессии* (запросов: {stats['total_requests']}): \n"
+    text += f"\n📦 <b>Статистика сессии</b> (запросов: {stats['total_requests']}): \n"
     text += f"   • Всего токенов: {stats['total_tokens']}\n"
     text += f"   • Входные: {stats['total_input_tokens']}\n"
     if stats['total_cached_tokens'] > 0:
@@ -262,25 +299,25 @@ class TelegramSMMBot:
         context.user_data['technique'] = technique
         
         welcome_text = f"""
-🤖 **Привет, {user.first_name}!**
+🤖 <b>Привет, {user.first_name}!</b>
 
 Я бот для генерации контента для Натриум Фитнесс.
 
-🎯 **Мои возможности:**
+🎯 <b>Мои возможности:</b>
 • Генерация актуальных тем для постов
 • Создание готовых постов с эмодзи и хештегами
 • Проверенные факты из научных источников
 
-📚 **База знаний:**
+📚 <b>База знаний:</b>
 • CrossFit методики
 • Исследования ВОЗ и PubMed
 • Книга о соцсетях
 """
         
-        await update.message.reply_text(welcome_text, parse_mode='Markdown', reply_markup=self.main_keyboard)
+        await update.message.reply_text(welcome_text, parse_mode='HTML', reply_markup=self.main_keyboard)
         
         # Показываем выбор фокуса вместо сразу генерации тем
-        focus_text = "🎯 *НА ЧТО СДЕЛАТЬ УПОР В ТЕМАХ?*\n\nВыберите направление:"
+        focus_text = "🎯 <b>НА ЧТО СДЕЛАТЬ УПОР В ТЕМАХ?</b>\n\nВыберите направление:"
         
         keyboard = [
             [InlineKeyboardButton("🍽️ Питание и диета", callback_data="focus_nutrition")],
@@ -292,7 +329,7 @@ class TelegramSMMBot:
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(focus_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await update.message.reply_text(focus_text, reply_markup=reply_markup, parse_mode='HTML')
 
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик нажатий на кнопки"""
@@ -321,16 +358,16 @@ class TelegramSMMBot:
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 await query.edit_message_text(
-                    f"✅ Тема: **{theme_name}**\n\nВыберите длину поста:",
+                    f"✅ Тема: <b>{theme_name}</b>\n\nВыберите длину поста:",
                     reply_markup=reply_markup,
-                    parse_mode='Markdown'
+                    parse_mode='HTML'
                 )
         
         # Пользователь хочет написать свою тему
         elif data == "custom_theme":
             await query.edit_message_text(
                 "✏️ Напишите свою тему для поста:",
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
             context.user_data['waiting_custom_theme'] = True
         
@@ -343,7 +380,7 @@ class TelegramSMMBot:
             if not theme_name:
                 await query.edit_message_text(
                     "❌ Ошибка: тема не выбрана. Используйте /start",
-                    parse_mode='Markdown'
+                    parse_mode='HTML'
                 )
                 return
             
@@ -356,7 +393,7 @@ class TelegramSMMBot:
             if not theme_name:
                 await query.edit_message_text(
                     "❌ Ошибка: тема не найдена. Используйте /start",
-                    parse_mode='Markdown'
+                    parse_mode='HTML'
                 )
                 return
             
@@ -369,9 +406,9 @@ class TelegramSMMBot:
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
-                f"✅ Тема: **{theme_name}**\n\nВыберите длину поста:",
+                f"✅ Тема: <b>{theme_name}</b>\n\nВыберите длину поста:",
                 reply_markup=reply_markup,
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
         
         # Другая тема - показываем УЖЕ сгенерированные темы
@@ -381,7 +418,7 @@ class TelegramSMMBot:
             if not parsed_themes:
                 await query.edit_message_text(
                     "❌ Темы не найдены. Используйте /start",
-                    parse_mode='Markdown'
+                    parse_mode='HTML'
                 )
                 return
             
@@ -389,7 +426,7 @@ class TelegramSMMBot:
             bulb = chr(0x1F4A1)  # 💡
             themes_text = (
                 f"{bulb} Выберите тему:\n\n"
-                f"_Длинная тема → 🔄📱_"
+                f"<i>Длинная тема → 🔄📱</i>"
             )
             
             # Создаём кнопки для ВСЕХ найденных тем
@@ -404,12 +441,12 @@ class TelegramSMMBot:
             keyboard.append([InlineKeyboardButton("✏️ Написать свою тему", callback_data="custom_theme")])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(themes_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await query.edit_message_text(themes_text, reply_markup=reply_markup, parse_mode='HTML')
         
         # Новые темы - показываем выбор фокуса
         elif data == "new_themes":
             # Показываем кнопки выбора фокуса
-            focus_text = "🎯 *НА ЧТО СДЕЛАТЬ УПОР В НОВЫХ ТЕМАХ?*\n\nВыберите направление:"
+            focus_text = "🎯 <b>НА ЧТО СДЕЛАТЬ УПОР В НОВЫХ ТЕМАХ?</b>\n\nВыберите направление:"
             
             keyboard = [
                 [InlineKeyboardButton("🍽️ Питание и диета", callback_data="focus_nutrition")],
@@ -421,7 +458,7 @@ class TelegramSMMBot:
             ]
             
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(focus_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await query.edit_message_text(focus_text, reply_markup=reply_markup, parse_mode='HTML')
         
         # Обработка выбора фокуса для новых тем
         elif data.startswith("focus_"):
@@ -442,7 +479,7 @@ class TelegramSMMBot:
             
             await query.edit_message_text(
                 "🔄 Генерирую новые темы...",
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
             
             try:
@@ -465,7 +502,7 @@ class TelegramSMMBot:
                 bulb = chr(0x1F4A1)  # 💡
                 themes_text = (
                     f"{bulb} Выберите тему:\n\n"
-                    f"_Длинная тема → 🔄📱_"
+                    f"<i>Длинная тема → 🔄📱</i>"
                 )
                 
                 # Создаём кнопки для ВСЕХ найденных тем
@@ -480,7 +517,7 @@ class TelegramSMMBot:
                 keyboard.append([InlineKeyboardButton("✏️ Написать свою тему", callback_data="custom_theme")])
                 
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(themes_text, reply_markup=reply_markup, parse_mode='Markdown')
+                await query.edit_message_text(themes_text, reply_markup=reply_markup, parse_mode='HTML')
                 
                 # Отправляем статистику, если включена
                 if usage:
@@ -488,7 +525,7 @@ class TelegramSMMBot:
                     settings = get_user_settings(user_id)
                     if settings['show_token_stats']:
                         stats_text = format_token_stats("Генерация тем", usage, user_id)
-                        await query.message.reply_text(stats_text, parse_mode='Markdown')
+                        await query.message.reply_text(stats_text, parse_mode='HTML')
                     
             except Exception as e:
                 logger.error(f"Ошибка генерации тем: {e}")
@@ -499,7 +536,7 @@ class TelegramSMMBot:
             await query.edit_message_text(
                 "✅ Работа завершена!\n\n"
                 "Используйте /start для новой сессии.",
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
             context.user_data.clear()
         
@@ -544,9 +581,9 @@ class TelegramSMMBot:
                 cache_percent = (stats['total_cached_tokens'] / stats['total_input_tokens'] * 100) if stats['total_input_tokens'] > 0 else 0
                 avg_tokens = stats['total_tokens'] / stats['total_requests']
                 
-                stats_text = f"📊 *СТАТИСТИКА СЕССИИ*\n\n"
-                stats_text += f"📦 *Запросов:* {stats['total_requests']}\n\n"
-                stats_text += f"🔢 *Токены:*\n"
+                stats_text = f"📊 <b>СТАТИСТИКА СЕССИИ</b>\n\n"
+                stats_text += f"📦 <b>Запросов:</b> {stats['total_requests']}\n\n"
+                stats_text += f"🔢 <b>Токены:</b>\n"
                 stats_text += f"   • Всего: {stats['total_tokens']}\n"
                 stats_text += f"   • Входные: {stats['total_input_tokens']}\n"
                 stats_text += f"      └ из кеша: {stats['total_cached_tokens']} ({cache_percent:.1f}% 💾)\n"
@@ -554,20 +591,20 @@ class TelegramSMMBot:
                 if stats['total_reasoning_tokens'] > 0:
                     stats_text += f"      └ reasoning: {stats['total_reasoning_tokens']}\n"
                 stats_text += f"   • Средне/запрос: {avg_tokens:.0f}\n\n"
-                stats_text += f"💰 *Общая стоимость:* ~{total_cost:.4f} ₽\n"
+                stats_text += f"💰 <b>Общая стоимость:</b> ~{total_cost:.4f} ₽\n"
                 if stats['total_cached_tokens'] > 0:
                     saved = (stats['total_cached_tokens'] / 1000 * (PRICING['input'] - PRICING['cached']))
                     stats_text += f"   └ Экономия на кеше: ~{saved:.4f} ₽"
                 
                 await query.answer()
-                await query.message.reply_text(stats_text, parse_mode='Markdown')
+                await query.message.reply_text(stats_text, parse_mode='HTML')
         
         # Закрыть настройки
         elif data == "close_settings":
             await query.edit_message_text(
                 "⚙️ Настройки закрыты.\n\n"
-                "Используйте кнопку *⚙️ Настройки* для повторного открытия.",
-                parse_mode='Markdown'
+                "Используйте кнопку <b>⚙️ Настройки</b> для повторного открытия.",
+                parse_mode='HTML'
             )
 
     async def text_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -608,9 +645,9 @@ class TelegramSMMBot:
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await update.message.reply_text(
-                f"✅ Тема: **{theme_name}**\n\nВыберите длину поста:",
+                f"✅ Тема: <b>{theme_name}</b>\n\nВыберите длину поста:",
                 reply_markup=reply_markup,
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
         else:
             await update.message.reply_text(
@@ -626,8 +663,8 @@ class TelegramSMMBot:
         
         status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
         
-        text = f"⚙️ *НАСТРОЙКИ БОТА*\n\n"
-        text += f"📊 *Вывод статистики токенов:* {status}\n"
+        text = f"⚙️ <b>НАСТРОЙКИ БОТА</b>\n\n"
+        text += f"📊 <b>Вывод статистики токенов:</b> {status}\n"
         
         keyboard = [
             [InlineKeyboardButton(
@@ -640,7 +677,7 @@ class TelegramSMMBot:
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML')
     
     async def show_settings_menu_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Показывает меню настроек (message version)"""
@@ -649,8 +686,8 @@ class TelegramSMMBot:
         
         status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
         
-        text = f"⚙️ *НАСТРОЙКИ БОТА*\n\n"
-        text += f"📊 *Вывод статистики токенов:* {status}\n"
+        text = f"⚙️ <b>НАСТРОЙКИ БОТА</b>\n\n"
+        text += f"📊 <b>Вывод статистики токенов:</b> {status}\n"
         
         keyboard = [
             [InlineKeyboardButton(
@@ -663,7 +700,7 @@ class TelegramSMMBot:
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='HTML')
     
     def parse_themes_list(self, themes_text: str) -> list:
         """Парсит список тем из текста (берет последние 10 если есть дубликаты)"""
@@ -715,10 +752,10 @@ class TelegramSMMBot:
     async def generate_post_callback(self, query, theme_name: str, technique: str, post_length: int):
         """Генерирует пост и отправляет пользователю"""
         await query.edit_message_text(
-            f"✍️ Генерирую пост на тему: **{theme_name}**\n"
+            f"✍️ Генерирую пост на тему: <b>{theme_name}</b>\n"
             f"📊 Длина: {post_length} символов\n\n"
             f"⏳ Пожалуйста, подождите...",
-            parse_mode='Markdown'
+            parse_mode='HTML'
         )
         
         try:
@@ -795,33 +832,23 @@ class TelegramSMMBot:
             
             post = '\n'.join(lines).strip()
             
-            # КРИТИЧЕСКИ ВАЖНО: Удаляем тройные обратные кавычки (```), которые конфликтуют с Telegram Markdown
+            # КРИТИЧЕСКИ ВАЖНО: Удаляем тройные обратные кавычки (```), которые конфликтуют с форматированием
             post = post.replace('```', '')
-            logger.info(f"Removed ``` markers that conflict with Telegram Markdown")
+            logger.info(f"Removed ``` markers")
             
             # КРИТИЧЕСКОЕ ЛОГИРОВАНИЕ: проверяем что осталось после очистки
-            logger.info(f"===== POST AFTER CLEANING (before Telegram) =====")
+            logger.info(f"===== POST AFTER CLEANING (before HTML conversion) =====")
             logger.info(f"Length: {len(post)} chars")
             logger.info(f"Contains **: {('**' in post)}")
+            logger.info(f"Contains [link]: {('[' in post and '](' in post)}")
             if '**' in post:
                 import re
                 bold_markers = re.findall(r'\*\*[^*]+\*\*', post)
                 logger.info(f"Found {len(bold_markers)} bold markers after cleaning")
             logger.info(f"=============================================\n")
             
-            # КРИТИЧЕСКАЯ ВАЛИДАЦИЯ: проверяем парность ** маркеров
-            double_star_count = post.count('**')
-            if double_star_count % 2 != 0:
-                logger.error(f"⚠️ UNPAIRED ** markers detected! Count: {double_star_count}")
-                logger.error(f"Text with unpaired markers:\n{post}")
-                # Удаляем все ** если они непарные
-                post = post.replace('**', '')
-                logger.warning(f"Removed all ** markers to prevent Telegram parse error")
-            
-            # КРИТИЧЕСКИ ВАЖНО: Telegram Markdown использует * (один), а не ** (два)
-            # Конвертируем ** в * для жирного текста
-            post = post.replace('**', '*')
-            logger.info(f"Converted ** to * for Telegram Markdown")
+            # НЕ проверяем парность ** - это сделает convert_markdown_to_html()
+            # Удаляем старую валидацию для Markdown
             
             # Нормализация источников: WHO → ВОЗ для единообразия
             post = post.replace('WHO', 'ВОЗ')
@@ -850,10 +877,17 @@ class TelegramSMMBot:
             
             logger.info(f"Wrapped sources in parentheses (ВОЗ, PubMed, Исследования, crossfit.com)")
             
+            # КРИТИЧЕСКИ ВАЖНО: Конвертируем Markdown в HTML для Telegram
+            # Яндекс генерирует ссылки в формате [текст](URL)
+            # Telegram с parse_mode='HTML' требует <a href="URL">текст</a>
+            post = convert_markdown_to_html(post)
+            logger.info(f"Converted Markdown to HTML for Telegram")
+            
             # ФИНАЛЬНОЕ ЛОГИРОВАНИЕ перед отправкой в Telegram
             logger.info(f"===== FINAL TEXT SENT TO TELEGRAM =====")
             logger.info(f"Length: {len(post)} chars")
-            logger.info(f"Single * count: {post.count('*')}")
+            logger.info(f"Contains <a href: {('<a href' in post)}")
+            logger.info(f"Contains <b>: {('<b>' in post)}")
             logger.info(f"First 200 chars: {post[:200]}")
             logger.info(f"Last 200 chars: {post[-200:]}")
             logger.info(f"=====================================\n")
@@ -861,7 +895,7 @@ class TelegramSMMBot:
             # Отправляем пост БЕЗ заголовка (для прямого копирования в канал)
             await query.message.reply_text(
                 post,
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
             
             # Отправляем статистику, если включена
@@ -871,7 +905,7 @@ class TelegramSMMBot:
                 settings = get_user_settings(user_id)
                 if settings['show_token_stats']:
                     stats_text = format_token_stats("Генерация поста", usage, user_id)
-                    await query.message.reply_text(stats_text, parse_mode='Markdown')
+                    await query.message.reply_text(stats_text, parse_mode='HTML')
             
             # Меню действий (используем короткие callback без темы)
             keyboard = [
@@ -883,9 +917,9 @@ class TelegramSMMBot:
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.message.reply_text(
-                "🎯 **Что делать дальше?**",
+                "🎯 <b>Что делать дальше?</b>",
                 reply_markup=reply_markup,
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
             
         except Exception as e:
