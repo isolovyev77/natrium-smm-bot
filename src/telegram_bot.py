@@ -926,37 +926,52 @@ class TelegramSMMBot:
             # Нормализация источников: WHO → ВОЗ для единообразия
             post = post.replace('WHO', 'ВОЗ')
             post = post.replace('(WHO)', '(ВОЗ)')
-            post = post.replace('[WHO]', '[ВОЗ]')
             logger.info(f"Normalized WHO → ВОЗ for consistency")
             
-            # КРИТИЧЕСКИ ВАЖНО: Конвертируем КВАДРАТНЫЕ скобки в КРУГЛЫЕ
-            # Яндекс иногда генерирует [Исследования] вместо (Исследования)
-            # Это нарушает единообразие, так как системный промпт требует круглые скобки
-            sources_list = ['ВОЗ', 'PubMed', 'Исследования', 'Исследование', 'crossfit.com']
-            for source in sources_list:
-                post = post.replace(f'[{source}]', f'({source})')
-            logger.info(f"Converted [source] to (source) for consistency")
+            # КРИТИЧЕСКИ ВАЖНО: Конвертируем Markdown в HTML ДО обработки источников
+            # Это сохранит правильные ссылки [PubMed](URL) → <a href="URL">PubMed</a>
+            # Яндекс генерирует ссылки в формате [текст](URL)
+            # Telegram с parse_mode='HTML' требует <a href="URL">текст</a>
+            post = convert_markdown_to_html(post)
+            logger.info(f"Converted Markdown to HTML (links preserved)")
             
-            # Автоматически оборачиваем источники в круглые скобки, если они без скобок
+            # ПОСЛЕ конвертации в HTML обрабатываем источники
+            # Теперь ссылки в формате <a href="URL">PubMed</a> и мы их НЕ трогаем
             import re
             
             # СНАЧАЛА обрабатываем crossfit.com (чтобы не превратить в (CrossFit).com)
             # Обрабатываем разные случаи: с точкой, точкой с запятой, переносом строки, в конце
-            post = re.sub(r'\s+crossfit\.com([\.;,!\?])', r' (crossfit.com)\1', post, flags=re.IGNORECASE)
-            post = re.sub(r'\s+crossfit\.com\n', r' (crossfit.com)\n', post, flags=re.IGNORECASE)
-            post = re.sub(r'\s+crossfit\.com$', r' (crossfit.com)', post, flags=re.IGNORECASE)
+            # НО НЕ трогаем если это внутри HTML тега <a>
+            # Паттерн: crossfit.com НЕ внутри <a>...</a>
+            post = re.sub(r'(?<!>)\s+crossfit\.com([\.;,!\?])', r' (crossfit.com)\1', post, flags=re.IGNORECASE)
+            post = re.sub(r'(?<!>)\s+crossfit\.com\n', r' (crossfit.com)\n', post, flags=re.IGNORECASE)
+            post = re.sub(r'(?<!>)\s+crossfit\.com$', r' (crossfit.com)', post, flags=re.IGNORECASE)
             
             # ПОТОМ обрабатываем остальные источники (но НЕ CrossFit без .com)
             # Расширенная обработка: точка, точка с запятой, запятая, восклицательный знак, вопросительный знак
+            # ВАЖНО: НЕ трогаем источники внутри HTML тегов <a>источник</a>
             sources = ['ВОЗ', 'PubMed', 'Исследования', 'Исследование']
             for source in sources:
-                # Заменяем источник с разными знаками препинания
+                # Заменяем источник с разными знаками препинания ТОЛЬКО если он НЕ внутри <a>...</a>
+                # Negative lookbehind (?<!>) - НЕ после >
                 # Пример: "текст ВОЗ." → "текст (ВОЗ).", "текст PubMed;" → "текст (PubMed);"
-                post = re.sub(rf'\s+{source}([\.;,!\?])', f' ({source})\\1', post)
-                post = re.sub(rf'\s+{source}\n', f' ({source})\n', post)
-                post = re.sub(rf'\s+{source}$', f' ({source})', post)
+                # НО: "<a href='...'>PubMed</a>" остаётся без изменений
+                post = re.sub(rf'(?<!>)\s+{source}([\.;,!\?])', f' ({source})\\1', post)
+                post = re.sub(rf'(?<!>)\s+{source}\n', f' ({source})\n', post)
+                post = re.sub(rf'(?<!>)\s+{source}$', f' ({source})', post)
             
             logger.info(f"Wrapped sources in parentheses (ВОЗ, PubMed, Исследования, crossfit.com)")
+            
+            # ДОПОЛНИТЕЛЬНО: Если остались артефакты типа (PubMed)(URL) - исправляем их
+            # Это происходит если Яндекс сгенерировал (Source)(URL) вместо [Source](URL)
+            # Конвертируем (Source)(URL) → <a href="URL">Source</a>
+            for source in sources + ['crossfit.com', 'ВОЗ']:
+                # Паттерн: (Источник)(http...)
+                pattern = rf'\({re.escape(source)}\)\((https?://[^\)]+)\)'
+                replacement = f'<a href="\\1">{source}</a>'
+                post = re.sub(pattern, replacement, post, flags=re.IGNORECASE)
+            
+            logger.info(f"Fixed malformed links (Source)(URL) → <a href>Source</a>")
             
             # КРИТИЧЕСКИ ВАЖНО: Удаляем артефакты рассуждений модели после хештегов
             # Ищем последнюю строку с хештегами (начинается с #)
@@ -974,11 +989,8 @@ class TelegramSMMBot:
                 post = '\n'.join(lines[:last_hashtag_index + 1])
                 logger.info(f"Removed reasoning artifacts after hashtags (line {last_hashtag_index})")
             
-            # КРИТИЧЕСКИ ВАЖНО: Конвертируем Markdown в HTML для Telegram
-            # Яндекс генерирует ссылки в формате [текст](URL)
-            # Telegram с parse_mode='HTML' требует <a href="URL">текст</a>
-            post = convert_markdown_to_html(post)
-            logger.info(f"Converted Markdown to HTML for Telegram")
+            # HTML конвертация уже выполнена ВЫШЕ (до обработки источников)
+            # Это важно для сохранения правильных ссылок [text](URL) → <a href="URL">text</a>
             
             # ФИНАЛЬНОЕ ЛОГИРОВАНИЕ перед отправкой в Telegram
             logger.info(f"===== FINAL TEXT SENT TO TELEGRAM =====")
