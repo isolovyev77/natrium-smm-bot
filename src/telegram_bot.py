@@ -438,6 +438,8 @@ class TelegramSMMBot:
                 button_text = f"{i}. {normalized_theme}"
                 keyboard.append([InlineKeyboardButton(button_text, callback_data=f"theme_{i}")])
             
+            # Кнопка "Другие темы по этому направлению" перед "Написать свою тему"
+            keyboard.append([InlineKeyboardButton("🔄 Другие темы по этому направлению", callback_data="regenerate_same_focus")])
             keyboard.append([InlineKeyboardButton("✏️ Написать свою тему", callback_data="custom_theme")])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -460,9 +462,22 @@ class TelegramSMMBot:
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(focus_text, reply_markup=reply_markup, parse_mode='HTML')
         
+        # Регенерация тем с тем же фокусом
+        elif data == "regenerate_same_focus":
+            # Получаем последний фокус из контекста
+            last_focus = context.user_data.get('last_focus', 'random')
+            logger.info(f"Regenerating themes with focus: {last_focus}")
+            
+            # Имитируем выбор того же фокуса
+            query.data = f"focus_{last_focus}"
+            # Продолжаем обработку как focus_
+        
         # Обработка выбора фокуса для новых тем
         elif data.startswith("focus_"):
             focus_type = data.replace("focus_", "")
+            
+            # Сохраняем последний фокус в контексте для кнопки "Другие темы"
+            context.user_data['last_focus'] = focus_type
             
             # Мапинг фокуса на ключевые слова
             focus_map = {
@@ -514,6 +529,8 @@ class TelegramSMMBot:
                     button_text = f"{i}. {normalized_theme}"
                     keyboard.append([InlineKeyboardButton(button_text, callback_data=f"theme_{i}")])
                 
+                # Кнопка "Другие темы по этому направлению" перед "Написать свою тему"
+                keyboard.append([InlineKeyboardButton("🔄 Другие темы по этому направлению", callback_data=f"focus_{focus_type}")])
                 keyboard.append([InlineKeyboardButton("✏️ Написать свою тему", callback_data="custom_theme")])
                 
                 reply_markup = InlineKeyboardMarkup(keyboard)
