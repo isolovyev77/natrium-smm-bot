@@ -287,8 +287,51 @@ class TelegramSMMBot:
         
         # Регистрация обработчиков
         self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("update_prompt", self.update_prompt_command))
         self.application.add_handler(CallbackQueryHandler(self.button_handler))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_handler))
+
+    async def update_prompt_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обновляет системный промпт агента в Yandex Cloud (только для администраторов)"""
+        user_id = update.effective_user.id
+        
+        # Проверка прав администратора (укажите свой Telegram ID)
+        ADMIN_IDS = [int(os.getenv("ADMIN_TELEGRAM_ID", "0"))]  # Добавьте свой ID в .env
+        
+        if user_id not in ADMIN_IDS and ADMIN_IDS != [0]:
+            await update.message.reply_text("❌ Эта команда доступна только администраторам.")
+            return
+        
+        await update.message.reply_text(
+            "🔄 <b>Обновление системного промпта агента...</b>\n\n"
+            "⏳ Это может занять несколько секунд.",
+            parse_mode='HTML'
+        )
+        
+        try:
+            success = self.natrium_bot.update_agent_prompt()
+            
+            if success:
+                await update.message.reply_text(
+                    "✅ <b>Системный промпт успешно обновлён!</b>\n\n"
+                    "Агент Yandex Cloud теперь использует новые требования:\n"
+                    "• Обязательный заголовок в CAPS\n"
+                    "• Обязательный лид-затравка после заголовка\n"
+                    "• Усиленный контроль структуры постов",
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ <b>Ошибка обновления промпта</b>\n\n"
+                    "Проверьте логи для деталей.",
+                    parse_mode='HTML'
+                )
+        except Exception as e:
+            logger.error(f"Error in update_prompt_command: {e}")
+            await update.message.reply_text(
+                f"❌ <b>Ошибка:</b> {str(e)}",
+                parse_mode='HTML'
+            )
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
@@ -883,25 +926,33 @@ class TelegramSMMBot:
             # Нормализация источников: WHO → ВОЗ для единообразия
             post = post.replace('WHO', 'ВОЗ')
             post = post.replace('(WHO)', '(ВОЗ)')
+            post = post.replace('[WHO]', '[ВОЗ]')
             logger.info(f"Normalized WHO → ВОЗ for consistency")
+            
+            # КРИТИЧЕСКИ ВАЖНО: Конвертируем КВАДРАТНЫЕ скобки в КРУГЛЫЕ
+            # Яндекс иногда генерирует [Исследования] вместо (Исследования)
+            # Это нарушает единообразие, так как системный промпт требует круглые скобки
+            sources_list = ['ВОЗ', 'PubMed', 'Исследования', 'Исследование', 'crossfit.com']
+            for source in sources_list:
+                post = post.replace(f'[{source}]', f'({source})')
+            logger.info(f"Converted [source] to (source) for consistency")
             
             # Автоматически оборачиваем источники в круглые скобки, если они без скобок
             import re
             
             # СНАЧАЛА обрабатываем crossfit.com (чтобы не превратить в (CrossFit).com)
-            post = re.sub(r'\s+crossfit\.com\.', r' (crossfit.com).', post, flags=re.IGNORECASE)
+            # Обрабатываем разные случаи: с точкой, точкой с запятой, переносом строки, в конце
+            post = re.sub(r'\s+crossfit\.com([\.;,!\?])', r' (crossfit.com)\1', post, flags=re.IGNORECASE)
             post = re.sub(r'\s+crossfit\.com\n', r' (crossfit.com)\n', post, flags=re.IGNORECASE)
             post = re.sub(r'\s+crossfit\.com$', r' (crossfit.com)', post, flags=re.IGNORECASE)
             
             # ПОТОМ обрабатываем остальные источники (но НЕ CrossFit без .com)
-            # CrossFit часто используется как часть текста ("в CrossFit", "для CrossFit атлетов")
-            # Поэтому НЕ оборачиваем его автоматически - модель сама должна ставить скобки
-            # Паттерн: источник в конце строки без скобок (ВОЗ, PubMed, Исследования)
+            # Расширенная обработка: точка, точка с запятой, запятая, восклицательный знак, вопросительный знак
             sources = ['ВОЗ', 'PubMed', 'Исследования', 'Исследование']
             for source in sources:
-                # Заменяем источник в конце предложения без скобок на вариант со скобками
-                # Пример: "текст ВОЗ." → "текст (ВОЗ)."
-                post = re.sub(rf'\s+{source}\.', f' ({source}).', post)
+                # Заменяем источник с разными знаками препинания
+                # Пример: "текст ВОЗ." → "текст (ВОЗ).", "текст PubMed;" → "текст (PubMed);"
+                post = re.sub(rf'\s+{source}([\.;,!\?])', f' ({source})\\1', post)
                 post = re.sub(rf'\s+{source}\n', f' ({source})\n', post)
                 post = re.sub(rf'\s+{source}$', f' ({source})', post)
             
