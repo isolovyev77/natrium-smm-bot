@@ -498,18 +498,31 @@ class TelegramSMMBot:
             )
             
             try:
+                # Получаем предыдущие темы для избежания повторений
+                all_previous_themes = context.user_data.get('all_generated_themes', [])
+                
                 # Формируем custom_input с фокусом
                 if focus_keywords:
                     custom_input = f"Сгенерируй 10 актуальных тем для постов с ФОКУСОМ НА: {focus_keywords}. Обязательно используй разнообразные форматы из книги о соцсетях!"
                 else:
                     custom_input = None
                 
-                themes, usage = self.natrium_bot.generate_themes(technique, custom_input=custom_input)
+                # Передаём предыдущие темы для избежания повторений
+                themes, usage = self.natrium_bot.generate_themes(
+                    technique, 
+                    custom_input=custom_input,
+                    previous_themes=all_previous_themes
+                )
                 context.user_data['themes'] = themes
                 
                 # Парсим темы и создаём кнопки
                 parsed_themes = self.parse_themes_list(themes)
                 context.user_data['parsed_themes'] = parsed_themes
+                
+                # Добавляем новые темы к списку всех сгенерированных тем
+                all_previous_themes.extend(parsed_themes)
+                context.user_data['all_generated_themes'] = all_previous_themes
+                logger.info(f"focus_{focus_type}: всего сгенерировано тем в сессии: {len(all_previous_themes)}")
                 
                 logger.info(f"focus_{focus_type}: распарсено {len(parsed_themes)} тем для кнопок")
                 
