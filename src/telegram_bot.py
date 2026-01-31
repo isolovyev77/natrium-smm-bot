@@ -25,7 +25,8 @@ PID_FILE = Path("/tmp/natrium-smm-bot.pid")
 LOCK_FILE = None
 
 # Глобальные настройки и счетчики (для каждого пользователя)
-USER_SETTINGS = {}  # {user_id: {'show_token_stats': True}}
+# ВАЖНО: USER_SETTINGS хранится в RAM и сбрасывается при перезапуске бота
+USER_SETTINGS = {}  # {user_id: {'show_token_stats': False}}  # по умолчанию выключено
 USER_SESSION_STATS = {}  # {user_id: {...}}
 
 # Тарифы Yandex Cloud GPT (руб. за 1000 токенов)
@@ -161,9 +162,9 @@ def convert_markdown_to_html(text: str) -> str:
 
 
 def get_user_settings(user_id: int) -> dict:
-    """Получить настройки пользователя"""
+    """Получить настройки пользователя (по умолчанию статистика выключена)"""
     if user_id not in USER_SETTINGS:
-        USER_SETTINGS[user_id] = {'show_token_stats': True}
+        USER_SETTINGS[user_id] = {'show_token_stats': False}
     return USER_SETTINGS[user_id]
 
 
