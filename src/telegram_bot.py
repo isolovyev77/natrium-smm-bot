@@ -1024,6 +1024,7 @@ class TelegramSMMBot:
                     theme=theme_name,
                     post_length=post_length
                 )
+                actual_provider = "OpenAI"
             else:
                 # Yandex (по умолчанию)
                 logger.info(f"👤 User {user_id}: Using Yandex for post (theme: {theme_name[:30]}...)")
@@ -1032,9 +1033,10 @@ class TelegramSMMBot:
                     technique=technique,
                     post_length=post_length
                 )
+                actual_provider = "Yandex"
             
             # КРИТИЧЕСКОЕ ЛОГИРОВАНИЕ: проверяем что пришло от AI
-            logger.info(f"===== RAW POST FROM YANDEX (before processing) =====")
+            logger.info(f"===== RAW POST FROM {actual_provider.upper()} (before processing) =====")
             logger.info(f"Length: {len(post)} chars")
             logger.info(f"First 200 chars: {post[:200]}")
             logger.info(f"Contains **: {('**' in post)}")
@@ -1213,6 +1215,7 @@ class TelegramSMMBot:
             
             # ФИНАЛЬНОЕ ЛОГИРОВАНИЕ перед отправкой в Telegram
             logger.info(f"===== FINAL TEXT SENT TO TELEGRAM =====")
+            logger.info(f"Provider: {actual_provider} ({model_name})")
             logger.info(f"Length: {len(post)} chars")
             logger.info(f"Contains <a href: {('<a href' in post)}")
             logger.info(f"Contains <b>: {('<b>' in post)}")
@@ -1220,9 +1223,12 @@ class TelegramSMMBot:
             logger.info(f"Last 200 chars: {post[-200:]}")
             logger.info(f"=====================================\n")
             
+            # Добавляем скрытый маркер провайдера в конец поста
+            post_with_marker = f"{post}\n\n<i>🤖 Сгенерировано: {model_name}</i>"
+            
             # Отправляем пост БЕЗ заголовка (для прямого копирования в канал)
             await query.message.reply_text(
-                post,
+                post_with_marker,
                 parse_mode='HTML'
             )
             
@@ -1251,10 +1257,17 @@ class TelegramSMMBot:
             )
             
         except Exception as e:
-            logger.error(f"Ошибка генерации поста: {e}")
+            logger.error(f"❌ Ошибка генерации поста: {e}")
+            logger.error(f"   Provider: {provider}, Model: {model_name}")
+            logger.exception("Full traceback:")
+            
+            # Показываем пользователю детальную ошибку с указанием провайдера
             await query.message.reply_text(
-                f"❌ Ошибка при генерации поста: {e}\n\n"
-                "Попробуйте ещё раз или используйте /start"
+                f"❌ <b>Ошибка генерации поста</b>\n\n"
+                f"Провайдер: {model_display}\n"
+                f"Ошибка: {str(e)}\n\n"
+                "Попробуйте ещё раз или используйте /start",
+                parse_mode='HTML'
             )
 
     def run(self):
