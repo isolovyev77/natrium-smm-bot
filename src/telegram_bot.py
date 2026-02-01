@@ -364,7 +364,7 @@ class TelegramSMMBot:
         focus_text = "🎯 <b>НА ЧТО СДЕЛАТЬ УПОР В ТЕМАХ?</b>\n\nВыберите направление:"
         
         keyboard = [
-            [InlineKeyboardButton("�️ Спорт и тренировки", callback_data="focus_sport")],
+            [InlineKeyboardButton("🏋 Спорт и тренировки", callback_data="focus_sport")],
             [InlineKeyboardButton("🥗 Питание и диета", callback_data="focus_nutrition")],
             [InlineKeyboardButton("😴 Сон и восстановление", callback_data="focus_sleep")],
             [InlineKeyboardButton("💪 Техника упражнений", callback_data="focus_technique")],
@@ -495,7 +495,7 @@ class TelegramSMMBot:
             focus_text = "🎯 <b>НА ЧТО СДЕЛАТЬ УПОР В НОВЫХ ТЕМАХ?</b>\n\nВыберите направление:"
             
             keyboard = [
-                [InlineKeyboardButton("�️ Спорт и тренировки", callback_data="focus_sport")],
+                [InlineKeyboardButton("🏋 Спорт и тренировки", callback_data="focus_sport")],
                 [InlineKeyboardButton("🥗 Питание и диета", callback_data="focus_nutrition")],
                 [InlineKeyboardButton("😴 Сон и восстановление", callback_data="focus_sleep")],
                 [InlineKeyboardButton("💪 Техника упражнений", callback_data="focus_technique")],
