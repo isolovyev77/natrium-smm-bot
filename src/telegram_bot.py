@@ -862,9 +862,6 @@ class TelegramSMMBot:
             lines = post.split('\n')
             post_start_index = None
             
-            # Эмодзи заголовков постов (НЕ путать с 🔄 🏋️ из рассуждений)
-            post_emojis = ['💪', '🧠', '💤', '🔥', '⚡️', '💓', '🍽️', '🏃', '⚡', '📊', '🎯']
-            
             # Артефакты рассуждений (удаляем эти строки ПОЛНОСТЬЮ)
             reasoning_markers = [
                 '🔄 Сначала мне нужно',
@@ -888,8 +885,19 @@ class TelegramSMMBot:
                     logger.info(f"Found 'ГОТОВЫЙ ПОСТ:' marker at line {i}")
                     break
             
-            # МЕТОД 2: Если маркера нет, ищем по эмодзи + ** + CAPS
+            # МЕТОД 2: Если маркера нет, ищем ЗАГОЛОВОК поста (НЕ секцию!)
+            # Заголовок имеет формат: [эмодзи] **[ТЕМА В CAPS]: [ключевая идея]**
+            # Секция имеет формат: [эмодзи] **[НАЗВАНИЕ СЕКЦИИ]:** (без двоеточия внутри **)
+            # КРИТИЧЕСКИ ВАЖНО: ищем строку с ** и двоеточием ВНУТРИ ** (между **...:...**)
             if post_start_index is None:
+                import re
+                # Паттерн заголовка: эмодзи + ** + CAPS слова + : + текст + **
+                # Примеры:
+                # ✅ 🏋️ **РАЗМИНКА И ВРАБАТЫВАНИЕ: МИФ О «ТРАТЕ СИЛ»**
+                # ✅ 💪 **ГРЕБЛЯ CONCEPT2: КАЛОРИИ ГОРЯТ КАК НИКОГДА**
+                # ❌ 🔥 **ПОЧЕМУ РАЗМИНКА НЕ „ТРАТА СИЛ":** (это секция, двоеточие ПОСЛЕ **)
+                header_pattern = re.compile(r'^[^\w]*\*\*[^:]+:[^*]+\*\*', re.UNICODE)
+                
                 for i, line in enumerate(lines):
                     stripped = line.strip()
                     if not stripped or len(stripped) < 10:
@@ -901,11 +909,10 @@ class TelegramSMMBot:
                     if stripped.startswith('{'):
                         continue
                     
-                    # Ищем: эмодзи поста в начале + ** + CAPS
-                    starts_with_post_emoji = any(stripped.startswith(emoji) for emoji in post_emojis)
-                    if starts_with_post_emoji and '**' in stripped and any(c.isupper() for c in stripped):
+                    # Ищем заголовок: ** + текст + : + текст + **
+                    if header_pattern.search(stripped):
                         post_start_index = i
-                        logger.info(f"Found post start by emoji+CAPS pattern at line {i}")
+                        logger.info(f"Found post header at line {i}: {stripped[:50]}")
                         break
             
             # Если нашли начало поста, берем только с этого момента
