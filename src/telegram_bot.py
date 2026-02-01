@@ -305,12 +305,21 @@ def format_token_stats(operation: str, usage: dict, user_id: int, model: str = N
         else:
             text += "\n"
 
-    # Накопительная статистика
-    total_session_cost = (
-        (stats['total_input_tokens'] - stats['total_cached_tokens']) / 1000 * PRICING['input'] +
-        stats['total_cached_tokens'] / 1000 * PRICING['cached'] +
-        stats['total_output_tokens'] / 1000 * PRICING['output']
-    )
+    # Накопительная статистика с правильной валютой
+    if provider == 'openai':
+        # OpenAI pricing
+        openai_input_price = 0.000003 if 'gpt-4o-mini' in (model or '') else 0.00003
+        openai_output_price = 0.000006 if 'gpt-4o-mini' in (model or '') else 0.00015
+        total_session_cost_usd = (stats['total_input_tokens'] * openai_input_price) + (stats['total_output_tokens'] * openai_output_price)
+        cost_display = f"~${total_session_cost_usd:.6f}"
+    else:
+        # Yandex pricing в рублях
+        total_session_cost = (
+            (stats['total_input_tokens'] - stats['total_cached_tokens']) / 1000 * PRICING['input'] +
+            stats['total_cached_tokens'] / 1000 * PRICING['cached'] +
+            stats['total_output_tokens'] / 1000 * PRICING['output']
+        )
+        cost_display = f"~{total_session_cost:.4f} ₽"
 
     text += f"\n📦 <b>Статистика сессии</b> (запросов: {stats['total_requests']}): \n"
     text += f"   • Всего токенов: {stats['total_tokens']}\n"
@@ -715,7 +724,24 @@ class TelegramSMMBot:
             user_id = query.from_user.id
             settings = get_user_settings(user_id)
             settings['show_token_stats'] = not settings['show_token_stats']
-            await self.show_settings_menu(query, context)
+            # Возврат в подменю статистики напрямую
+            stats_status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
+            
+            text = f"📊 <b>СТАТИСТИКА</b>\n\n"
+            text += f"📊 <b>Вывод статистики токенов:</b> {stats_status}\n"
+            
+            keyboard = [
+                [InlineKeyboardButton(
+                    "❌ Выключить статистику" if settings['show_token_stats'] else "✅ Включить статистику",
+                    callback_data="toggle_stats"
+                )],
+                [InlineKeyboardButton("📊 Показать статистику сессии", callback_data="view_stats")],
+                [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
+                [InlineKeyboardButton("⬅️ Назад к настройкам", callback_data="settings")]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML')
         
         # Сброс счетчиков сессии
         elif data == "reset_stats":
@@ -729,21 +755,58 @@ class TelegramSMMBot:
                 'total_tokens': 0
             }
             await query.answer("✅ Счетчики сессии сброшены", show_alert=True)
-            await self.show_settings_menu(query, context)
+            # Возврат в подменю статистики
+            query.data = "stats_menu"
+            # Нужно создать фиктивный update для рекурсивного вызова
+            from telegram import CallbackQuery
+            new_query = query
+            new_query.data = "stats_menu"
+            # Проще просто показать подменю напрямую
+            settings = get_user_settings(user_id)
+            stats_status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
+            
+            text = f"📊 <b>СТАТИСТИКА</b>\n\n"
+            text += f"📊 <b>Вывод статистики токенов:</b> {stats_status}\n"
+            
+            keyboard = [
+                [InlineKeyboardButton(
+                    "🔄 Переключить статистику" if settings['show_token_stats'] else "✅ Включить статистику",
+                    callback_data="toggle_stats"
+                )],
+                [InlineKeyboardButton("📊 Показать статистику сессии", callback_data="view_stats")],
+                [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
+                [InlineKeyboardButton("⬅️ Назад к настройкам", callback_data="settings")]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML')
         
         # Показать текущую статистику сессии
         elif data == "view_stats":
             user_id = query.from_user.id
             stats = get_user_stats(user_id)
+            provider = get_user_ai_provider(user_id)
             
             if stats['total_requests'] == 0:
                 await query.answer("⚠️ Запросов ещё не было", show_alert=True)
             else:
-                total_cost = (
-                    (stats['total_input_tokens'] - stats['total_cached_tokens']) / 1000 * PRICING['input'] +
-                    stats['total_cached_tokens'] / 1000 * PRICING['cached'] +
-                    stats['total_output_tokens'] / 1000 * PRICING['output']
-                )
+                # Расчет стоимости с правильной валютой
+                if provider == 'openai':
+                    # Примерная цена для OpenAI (может быть смесь моделей в сессии)
+                    avg_input_price = 0.000003  # усредненная между gpt-4o-mini и gpt-5.2
+                    avg_output_price = 0.000015
+                    total_cost_usd = (stats['total_input_tokens'] * avg_input_price) + (stats['total_output_tokens'] * avg_output_price)
+                    cost_text = f"~${total_cost_usd:.6f}"
+                    currency = "$"
+                else:
+                    total_cost = (
+                        (stats['total_input_tokens'] - stats['total_cached_tokens']) / 1000 * PRICING['input'] +
+                        stats['total_cached_tokens'] / 1000 * PRICING['cached'] +
+                        stats['total_output_tokens'] / 1000 * PRICING['output']
+                    )
+                    cost_text = f"~{total_cost:.4f} ₽"
+                    currency = "₽"
+                
                 cache_percent = (stats['total_cached_tokens'] / stats['total_input_tokens'] * 100) if stats['total_input_tokens'] > 0 else 0
                 avg_tokens = stats['total_tokens'] / stats['total_requests']
                 
@@ -752,18 +815,43 @@ class TelegramSMMBot:
                 stats_text += f"🔢 <b>Токены:</b>\n"
                 stats_text += f"   • Всего: {stats['total_tokens']}\n"
                 stats_text += f"   • Входные: {stats['total_input_tokens']}\n"
-                stats_text += f"      └ из кеша: {stats['total_cached_tokens']} ({cache_percent:.1f}% 💾)\n"
+                if stats['total_cached_tokens'] > 0:
+                    stats_text += f"      └ из кеша: {stats['total_cached_tokens']} ({cache_percent:.1f}% 💾)\n"
                 stats_text += f"   • Выходные: {stats['total_output_tokens']}\n"
                 if stats['total_reasoning_tokens'] > 0:
                     stats_text += f"      └ reasoning: {stats['total_reasoning_tokens']}\n"
                 stats_text += f"   • Средне/запрос: {avg_tokens:.0f}\n\n"
-                stats_text += f"💰 <b>Общая стоимость:</b> ~{total_cost:.4f} ₽\n"
-                if stats['total_cached_tokens'] > 0:
+                stats_text += f"💰 <b>Общая стоимость:</b> {cost_text}\n"
+                if provider == 'yandex' and stats['total_cached_tokens'] > 0:
                     saved = (stats['total_cached_tokens'] / 1000 * (PRICING['input'] - PRICING['cached']))
                     stats_text += f"   └ Экономия на кеше: ~{saved:.4f} ₽"
                 
                 await query.answer()
                 await query.message.reply_text(stats_text, parse_mode='HTML')
+        
+        # Подменю статистики
+        elif data == "stats_menu":
+            user_id = query.from_user.id
+            settings = get_user_settings(user_id)
+            
+            # Индикатор включения статистики
+            stats_status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
+            
+            text = f"📊 <b>СТАТИСТИКА</b>\n\n"
+            text += f"📊 <b>Вывод статистики токенов:</b> {stats_status}\n"
+            
+            keyboard = [
+                [InlineKeyboardButton(
+                    "🔄 Переключить статистику" if settings['show_token_stats'] else "✅ Включить статистику",
+                    callback_data="toggle_stats"
+                )],
+                [InlineKeyboardButton("📊 Показать статистику сессии", callback_data="view_stats")],
+                [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
+                [InlineKeyboardButton("⬅️ Назад к настройкам", callback_data="settings")]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML')
         
         # Закрыть настройки
         elif data == "close_settings":
@@ -885,27 +973,17 @@ class TelegramSMMBot:
     async def show_settings_menu(self, query, context: ContextTypes.DEFAULT_TYPE):
         """Показывает меню настроек (callback version)"""
         user_id = query.from_user.id
-        settings = get_user_settings(user_id)
         provider = get_user_ai_provider(user_id)
-        
-        # Индикатор включения статистики
-        stats_status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
         
         # Индикатор AI провайдера
         provider_display = "🧠 Yandex" if provider == 'yandex' else "🤖 OpenAI"
         
         text = f"⚙️ <b>НАСТРОЙКИ БОТА</b>\n\n"
         text += f"🤖 <b>AI Провайдер:</b> {provider_display}\n"
-        text += f"📊 <b>Вывод статистики токенов:</b> {stats_status}\n"
         
         keyboard = [
             [InlineKeyboardButton("🤖 Выбрать AI модель", callback_data="choose_ai_provider")],
-            [InlineKeyboardButton(
-                "🔄 Переключить статистику" if settings['show_token_stats'] else "✅ Включить статистику",
-                callback_data="toggle_stats"
-            )],
-            [InlineKeyboardButton("📊 Показать статистику сессии", callback_data="view_stats")],
-            [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
+            [InlineKeyboardButton("📊 Статистика", callback_data="stats_menu")],
             [InlineKeyboardButton("✖️ Закрыть", callback_data="close_settings")]
         ]
         
@@ -915,27 +993,17 @@ class TelegramSMMBot:
     async def show_settings_menu_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Показывает меню настроек (message version)"""
         user_id = update.effective_user.id
-        settings = get_user_settings(user_id)
         provider = get_user_ai_provider(user_id)
-        
-        # Индикатор включения статистики
-        stats_status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
         
         # Индикатор AI провайдера
         provider_display = "🧠 Yandex" if provider == 'yandex' else "🤖 OpenAI"
         
         text = f"⚙️ <b>НАСТРОЙКИ БОТА</b>\n\n"
         text += f"🤖 <b>AI Провайдер:</b> {provider_display}\n"
-        text += f"📊 <b>Вывод статистики токенов:</b> {stats_status}\n"
         
         keyboard = [
             [InlineKeyboardButton("🤖 Выбрать AI модель", callback_data="choose_ai_provider")],
-            [InlineKeyboardButton(
-                "🔄 Переключить статистику" if settings['show_token_stats'] else "✅ Включить статистику",
-                callback_data="toggle_stats"
-            )],
-            [InlineKeyboardButton("📊 Показать статистику сессии", callback_data="view_stats")],
-            [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
+            [InlineKeyboardButton("📊 Статистика", callback_data="stats_menu")],
             [InlineKeyboardButton("✖️ Закрыть", callback_data="close_settings")]
         ]
         
