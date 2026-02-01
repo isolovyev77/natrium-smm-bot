@@ -19,7 +19,11 @@ class OpenAIBot:
     
     def __init__(self, prompts_dir: str = "prompts"):
         self.api_key = os.getenv("OPENAI_API_KEY")
-        self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        
+        # 2-шаговый пайплайн: разные модели для разных задач
+        self.themes_model = os.getenv("OPENAI_THEMES_MODEL", "gpt-4o-mini")  # Быстро, дешево
+        self.post_model = os.getenv("OPENAI_POST_MODEL", "gpt-5.2")  # Качество, креатив
+        
         self.prompts_dir = Path(__file__).parent.parent / prompts_dir
         
         if not self.api_key:
@@ -29,6 +33,8 @@ class OpenAIBot:
         
         # Загружаем системный промпт
         self.system_prompt = self._load_system_prompt()
+        
+        logger.info(f"OpenAIBot initialized: themes={self.themes_model}, post={self.post_model}")
     
     def _load_system_prompt(self, prompt_file: str = "agent_system_prompt.md") -> str:
         """Загружает системный промпт из файла"""
@@ -131,7 +137,7 @@ class OpenAIBot:
 ...
 🔟 Тема 10 [источник]"""
         
-        return self._call_api(user_prompt)
+        return self._call_api(user_prompt, model=self.themes_model)
     
     def generate_post(self, theme: str, technique: str = "cov+cok", post_length: int = 500) -> tuple:
         """
@@ -223,23 +229,27 @@ class OpenAIBot:
 
 #натриумфитнес #crossfit #восстановление"""
         
-        return self._call_api(user_prompt)
+        return self._call_api(user_prompt, model=self.post_model)
     
-    def _call_api(self, user_prompt: str) -> tuple:
+    def _call_api(self, user_prompt: str, model: str = None) -> tuple:
         """
         Выполняет запрос к OpenAI API.
         
         Args:
             user_prompt: пользовательский промпт
+            model: модель для использования (если None - используется post_model)
         
         Returns:
             tuple: (result_text, usage_dict)
         """
         try:
+            # Используем переданную модель или дефолтную
+            selected_model = model or self.post_model
+            
             # Безопасная обработка UTF-8
             user_prompt = user_prompt.encode('utf-8', errors='ignore').decode('utf-8')
-            
-            logger.info(f"🔍 OpenAI API call with model: {self.model}")
+                model=selected_model,
+            logger.info(f"🔍 OpenAI API call with model: {selected_model}")
             
             response = self.client.chat.completions.create(
                 model=self.model,
