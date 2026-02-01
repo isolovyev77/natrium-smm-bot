@@ -170,6 +170,44 @@ def get_user_settings(user_id: int) -> dict:
     return USER_SETTINGS[user_id]
 
 
+def get_user_ai_provider(user_id: int) -> str:
+    """
+    Получить выбранный AI провайдер пользователя.
+    По умолчанию: 'yandex' для обратной совместимости.
+    
+    Returns:
+        'yandex' | 'openai'
+    """
+    return USER_AI_PROVIDER.get(user_id, 'yandex')
+
+
+def set_user_ai_provider(user_id: int, provider: str):
+    """
+    Установить AI провайдер для пользователя.
+    При смене провайдера сбрасывается статистика сессии.
+    
+    Args:
+        user_id: Telegram user ID
+        provider: 'yandex' | 'openai'
+    """
+    old_provider = USER_AI_PROVIDER.get(user_id)
+    
+    if old_provider != provider:
+        # Сбрасываем статистику при смене провайдера
+        if user_id in USER_SESSION_STATS:
+            USER_SESSION_STATS[user_id] = {
+                'total_input_tokens': 0,
+                'total_output_tokens': 0,
+                'total_cached_tokens': 0,
+                'total_reasoning_tokens': 0,
+                'total_requests': 0,
+                'total_tokens': 0
+            }
+        logger.info(f"👤 User {user_id}: {old_provider} → {provider}, stats reset")
+    
+    USER_AI_PROVIDER[user_id] = provider
+
+
 def get_user_stats(user_id: int) -> dict:
     """Получить статистику сессии пользователя"""
     if user_id not in USER_SESSION_STATS:
@@ -275,7 +313,17 @@ class TelegramSMMBot:
         if not TELEGRAM_BOT_TOKEN:
             raise ValueError("TELEGRAM_BOT_TOKEN не найден в переменных окружения. Проверьте GitHub Secrets.")
         
-        self.natrium_bot = NatriumBot()
+        # Инициализация AI провайдеров
+        self.natrium_bot = NatriumBot()  # Yandex Cloud
+        
+        # OpenAI (если API key доступен)
+        try:
+            self.openai_bot = OpenAIBot()
+            logger.info("✅ OpenAIBot инициализирован")
+        except ValueError as e:
+            logger.warning(f"⚠️ OpenAI не доступен: {e}")
+            self.openai_bot = None
+        
         self.application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
         
         # Постоянная клавиатура с кнопками
@@ -553,12 +601,26 @@ class TelegramSMMBot:
                 else:
                     custom_input = None
                 
-                # Передаём предыдущие темы для избежания повторений
-                themes, usage = self.natrium_bot.generate_themes(
-                    technique, 
-                    custom_input=custom_input,
-                    previous_themes=all_previous_themes
-                )
+                # Получаем выбранный AI провайдер
+                user_id = query.from_user.id
+                provider = get_user_ai_provider(user_id)
+                
+                # Роутинг на правильного провайдера
+                if provider == 'openai' and self.openai_bot:
+                    logger.info(f"👤 User {user_id}: Using OpenAI for themes")
+                    themes, usage = self.openai_bot.generate_themes(
+                        custom_input=custom_input,
+                        previous_themes=all_previous_themes
+                    )
+                else:
+                    # Yandex (по умолчанию)
+                    logger.info(f"👤 User {user_id}: Using Yandex for themes")
+                    themes, usage = self.natrium_bot.generate_themes(
+                        technique, 
+                        custom_input=custom_input,
+                        previous_themes=all_previous_themes
+                    )
+                
                 context.user_data['themes'] = themes
                 
                 # Парсим темы и создаём кнопки
@@ -682,6 +744,61 @@ class TelegramSMMBot:
                 "Используйте кнопку <b>⚙️ Настройки</b> для повторного открытия.",
                 parse_mode='HTML'
             )
+        
+        # Выбор AI провайдера
+        elif data == "choose_ai_provider":
+            user_id = query.from_user.id
+            current_provider = get_user_ai_provider(user_id)
+            
+            text = "🤖 <b>ВЫБОР AI МОДЕЛИ</b>\n\n"
+            text += "Выберите AI провайдер для генерации контента:\n\n"
+            text += "🧠 <b>Yandex YandexGPT</b>\n"
+            text += "   • Стабильно и быстро\n"
+            text += "   • ~₽0.035 за пост\n"
+            text += "   • File Search + Web Search\n\n"
+            text += "🤖 <b>OpenAI GPT-5.2</b>\n"
+            text += "   • Высокое качество текста\n"
+            text += "   • ~$0.03 за пост\n"
+            text += "   • 2-шаговый пайплайн\n\n"
+            text += f"<i>Текущий: {('🧠 Yandex' if current_provider == 'yandex' else '🤖 OpenAI')}</i>"
+            
+            keyboard = [
+                [InlineKeyboardButton(
+                    "🧠 Yandex" + (" ✅" if current_provider == 'yandex' else ""),
+                    callback_data="set_provider_yandex"
+                )],
+                [InlineKeyboardButton(
+                    "🤖 OpenAI" + (" ✅" if current_provider == 'openai' else ""),
+                    callback_data="set_provider_openai"
+                )],
+                [InlineKeyboardButton("⬅️ Назад к настройкам", callback_data="settings")]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML')
+        
+        # Установка Yandex провайдера
+        elif data == "set_provider_yandex":
+            user_id = query.from_user.id
+            set_user_ai_provider(user_id, 'yandex')
+            await query.answer("✅ Провайдер изменён на Yandex", show_alert=True)
+            await self.show_settings_menu(query, context)
+        
+        # Установка OpenAI провайдера
+        elif data == "set_provider_openai":
+            user_id = query.from_user.id
+            
+            # Проверяем доступность OpenAI
+            if not self.openai_bot:
+                await query.answer(
+                    "❌ OpenAI недоступен\nПроверьте OPENAI_API_KEY в .env",
+                    show_alert=True
+                )
+                return
+            
+            set_user_ai_provider(user_id, 'openai')
+            await query.answer("✅ Провайдер изменён на OpenAI", show_alert=True)
+            await self.show_settings_menu(query, context)
 
     async def text_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик текстовых сообщений"""
@@ -736,19 +853,26 @@ class TelegramSMMBot:
         """Показывает меню настроек (callback version)"""
         user_id = query.from_user.id
         settings = get_user_settings(user_id)
+        provider = get_user_ai_provider(user_id)
         
-        status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
+        # Индикатор включения статистики
+        stats_status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
+        
+        # Индикатор AI провайдера
+        provider_display = "🧠 Yandex" if provider == 'yandex' else "🤖 OpenAI"
         
         text = f"⚙️ <b>НАСТРОЙКИ БОТА</b>\n\n"
-        text += f"📊 <b>Вывод статистики токенов:</b> {status}\n"
+        text += f"🤖 <b>AI Провайдер:</b> {provider_display}\n"
+        text += f"📊 <b>Вывод статистики токенов:</b> {stats_status}\n"
         
         keyboard = [
+            [InlineKeyboardButton("🤖 Выбрать AI модель", callback_data="choose_ai_provider")],
             [InlineKeyboardButton(
                 "🔄 Переключить статистику" if settings['show_token_stats'] else "✅ Включить статистику",
                 callback_data="toggle_stats"
             )],
-            [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
             [InlineKeyboardButton("📊 Показать статистику сессии", callback_data="view_stats")],
+            [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
             [InlineKeyboardButton("✖️ Закрыть", callback_data="close_settings")]
         ]
         
@@ -759,19 +883,26 @@ class TelegramSMMBot:
         """Показывает меню настроек (message version)"""
         user_id = update.effective_user.id
         settings = get_user_settings(user_id)
+        provider = get_user_ai_provider(user_id)
         
-        status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
+        # Индикатор включения статистики
+        stats_status = "✅ Включен" if settings['show_token_stats'] else "❌ Выключен"
+        
+        # Индикатор AI провайдера
+        provider_display = "🧠 Yandex" if provider == 'yandex' else "🤖 OpenAI"
         
         text = f"⚙️ <b>НАСТРОЙКИ БОТА</b>\n\n"
-        text += f"📊 <b>Вывод статистики токенов:</b> {status}\n"
+        text += f"🤖 <b>AI Провайдер:</b> {provider_display}\n"
+        text += f"📊 <b>Вывод статистики токенов:</b> {stats_status}\n"
         
         keyboard = [
+            [InlineKeyboardButton("🤖 Выбрать AI модель", callback_data="choose_ai_provider")],
             [InlineKeyboardButton(
                 "🔄 Переключить статистику" if settings['show_token_stats'] else "✅ Включить статистику",
                 callback_data="toggle_stats"
             )],
-            [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
             [InlineKeyboardButton("📊 Показать статистику сессии", callback_data="view_stats")],
+            [InlineKeyboardButton("🔄 Сбросить счетчики сессии", callback_data="reset_stats")],
             [InlineKeyboardButton("✖️ Закрыть", callback_data="close_settings")]
         ]
         
@@ -835,13 +966,27 @@ class TelegramSMMBot:
         )
         
         try:
-            post, usage = self.natrium_bot.generate_post(
-                theme=theme_name,
-                technique=technique,
-                post_length=post_length
-            )
+            # Получаем выбранный AI провайдер
+            user_id = query.from_user.id
+            provider = get_user_ai_provider(user_id)
             
-            # КРИТИЧЕСКОЕ ЛОГИРОВАНИЕ: проверяем что пришло от Яндекса
+            # Роутинг на правильного провайдера
+            if provider == 'openai' and self.openai_bot:
+                logger.info(f"👤 User {user_id}: Using OpenAI for post")
+                post, usage = self.openai_bot.generate_post(
+                    theme=theme_name,
+                    post_length=post_length
+                )
+            else:
+                # Yandex (по умолчанию)
+                logger.info(f"👤 User {user_id}: Using Yandex for post")
+                post, usage = self.natrium_bot.generate_post(
+                    theme=theme_name,
+                    technique=technique,
+                    post_length=post_length
+                )
+            
+            # КРИТИЧЕСКОЕ ЛОГИРОВАНИЕ: проверяем что пришло от AI
             logger.info(f"===== RAW POST FROM YANDEX (before processing) =====")
             logger.info(f"Length: {len(post)} chars")
             logger.info(f"First 200 chars: {post[:200]}")

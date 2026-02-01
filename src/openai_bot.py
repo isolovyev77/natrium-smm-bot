@@ -12,9 +12,8 @@ load_dotenv()
 
 class OpenAIBot:
     """
-    Класс для работы с OpenAI API.
-    Вариант A: Без Vector Store, с прямыми промптами.
-    Аналог NatriumBot для OpenAI.
+    Класс для работы с OpenAI Responses API.
+    Использует hosted tools: file_search + web_search.
     """
     
     def __init__(self, prompts_dir: str = "prompts"):
@@ -23,6 +22,9 @@ class OpenAIBot:
         # 2-шаговый пайплайн: разные модели для разных задач
         self.themes_model = os.getenv("OPENAI_THEMES_MODEL", "gpt-4o-mini")  # Быстро, дешево
         self.post_model = os.getenv("OPENAI_POST_MODEL", "gpt-5.2")  # Качество, креатив
+        
+        # Vector Store ID (если есть - используем file_search)
+        self.vector_store_id = os.getenv("OPENAI_VECTOR_STORE_ID")
         
         self.prompts_dir = Path(__file__).parent.parent / prompts_dir
         
@@ -34,7 +36,27 @@ class OpenAIBot:
         # Загружаем системный промпт
         self.system_prompt = self._load_system_prompt()
         
-        logger.info(f"OpenAIBot initialized: themes={self.themes_model}, post={self.post_model}")
+        # Определяем доступные инструменты
+        self.available_tools = self._check_available_tools()
+        
+        logger.info(f"OpenAIBot initialized:")
+        logger.info(f"  Themes: {self.themes_model}")
+        logger.info(f"  Posts: {self.post_model}")
+        logger.info(f"  Tools: {', '.join(self.available_tools) if self.available_tools else 'None'}")
+    
+    def _check_available_tools(self) -> list:
+        """Проверяет какие tools доступны"""
+        tools = []
+        
+        # File Search доступен если есть Vector Store
+        if self.vector_store_id:
+            tools.append("file_search")
+            logger.info(f"  Vector Store: {self.vector_store_id}")
+        
+        # Web Search - проверим при первом запросе
+        # (оставляем возможность добавить позже)
+        
+        return tools
     
     def _load_system_prompt(self, prompt_file: str = "agent_system_prompt.md") -> str:
         """Загружает системный промпт из файла"""
@@ -233,10 +255,10 @@ class OpenAIBot:
     
     def _call_api(self, user_prompt: str, model: str = None) -> tuple:
         """
-        Выполняет запрос к OpenAI API.
+        Выполняет запрос к OpenAI Responses API.
         
         Args:
-            user_prompt: пользовательский промпт
+            user_prompt: пользовательский промпт (input)
             model: модель для использования (если None - используется post_model)
         
         Returns:
@@ -248,26 +270,39 @@ class OpenAIBot:
             
             # Безопасная обработка UTF-8
             user_prompt = user_prompt.encode('utf-8', errors='ignore').decode('utf-8')
-                model=selected_model,
-            logger.info(f"🔍 OpenAI API call with model: {selected_model}")
             
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
+            # Комбинируем системный промпт с пользовательским
+            full_input = f"{self.system_prompt}\n\n{user_prompt}"
+            
+            # Формируем список tools
+            tools = []
+            if self.vector_store_id and "file_search" in self.available_tools:
+                tools.append({
+                    "type": "file_search",
+                    "vector_store_ids": [self.vector_store_id]
+                })
+            
+            logger.info(f"🔍 OpenAI Responses API call:")
+            logger.info(f"   Model: {selected_model}")
+            logger.info(f"   Tools: {[t['type'] for t in tools] if tools else 'None'}")
+            
+            # Responses API вызов
+            response = self.client.responses.create(
+                model=selected_model,
+                input=full_input,
+                tools=tools if tools else None,
                 temperature=0.7,
                 max_tokens=2000
             )
             
-            result = response.choices[0].message.content.strip()
+            # Извлекаем результат
+            result = response.output_text.strip()
             
             # Извлекаем usage данные
             usage = {
-                'input_tokens': response.usage.prompt_tokens,
-                'output_tokens': response.usage.completion_tokens,
-                'total_tokens': response.usage.total_tokens
+                'input_tokens': response.usage.input_tokens if hasattr(response.usage, 'input_tokens') else 0,
+                'output_tokens': response.usage.output_tokens if hasattr(response.usage, 'output_tokens') else 0,
+                'total_tokens': response.usage.total_tokens if hasattr(response.usage, 'total_tokens') else 0
             }
             
             logger.info(f"✅ OpenAI response received: {len(result)} chars, {usage['total_tokens']} tokens")
@@ -275,5 +310,5 @@ class OpenAIBot:
             return result, usage
             
         except Exception as e:
-            logger.error(f"❌ OpenAI API error: {e}")
+            logger.error(f"❌ OpenAI Responses API error: {e}")
             raise
