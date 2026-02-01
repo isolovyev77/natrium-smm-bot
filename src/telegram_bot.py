@@ -11,6 +11,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from src.bot import NatriumBot
+from src.openai_bot import OpenAIBot
 from src.config import TELEGRAM_BOT_TOKEN
 
 # Настройка логирования
@@ -28,6 +29,7 @@ LOCK_FILE = None
 # ВАЖНО: USER_SETTINGS хранится в RAM и сбрасывается при перезапуске бота
 USER_SETTINGS = {}  # {user_id: {'show_token_stats': False}}  # по умолчанию выключено
 USER_SESSION_STATS = {}  # {user_id: {...}}
+USER_AI_PROVIDER = {}  # {user_id: 'yandex' | 'openai'}  # По умолчанию 'yandex'
 
 # Тарифы Yandex Cloud GPT (руб. за 1000 токенов)
 PRICING = {
