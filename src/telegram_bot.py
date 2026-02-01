@@ -342,7 +342,7 @@ def format_token_stats(operation: str, usage: dict, user_id: int, model: str = N
         cache_percent_total = (stats['total_cached_tokens'] / stats['total_input_tokens'] * 100) if stats['total_input_tokens'] > 0 else 0
         text += f"      └ из кеша: {stats['total_cached_tokens']} ({cache_percent_total:.1f}% 💾)\n"
     text += f"   • Выходные: {stats['total_output_tokens']}\n"
-    text += f"   • Стоимость: ~{total_session_cost:.4f} ₽\n"
+    text += f"   • Стоимость: {cost_display}\n"
 
     return text
 
@@ -713,8 +713,17 @@ class TelegramSMMBot:
                             model_for_stats = self.openai_bot.themes_model
                         else:
                             model_for_stats = "YandexGPT"
-                        stats_text = format_token_stats("Генерация тем", usage, user_id, model=model_for_stats, provider=provider)
-                        await query.message.reply_text(stats_text, parse_mode='HTML')
+                        try:
+                            stats_text = format_token_stats("Генерация тем", usage, user_id, model=model_for_stats, provider=provider)
+                            await query.message.reply_text(stats_text, parse_mode='HTML')
+                        except Exception as stats_error:
+                            logger.error(f"❌ Ошибка форматирования статистики тем: {stats_error}")
+                            logger.exception("Stats formatting traceback:")
+                            await query.message.reply_text(
+                                f"⚠️ <b>Ошибка отображения статистики</b>\n\n"
+                                f"Ошибка: {str(stats_error)}",
+                                parse_mode='HTML'
+                            )
                     
             except Exception as e:
                 logger.error(f"Ошибка генерации тем: {e}")
@@ -1337,8 +1346,17 @@ class TelegramSMMBot:
                 user_id = query.from_user.id
                 settings = get_user_settings(user_id)
                 if settings['show_token_stats']:
-                    stats_text = format_token_stats("Генерация поста", usage, user_id, model=model_name, provider=provider)
-                    await query.message.reply_text(stats_text, parse_mode='HTML')
+                    try:
+                        stats_text = format_token_stats("Генерация поста", usage, user_id, model=model_name, provider=provider)
+                        await query.message.reply_text(stats_text, parse_mode='HTML')
+                    except Exception as stats_error:
+                        logger.error(f"❌ Ошибка форматирования статистики: {stats_error}")
+                        logger.exception("Stats formatting traceback:")
+                        await query.message.reply_text(
+                            f"⚠️ <b>Ошибка отображения статистики</b>\n\n"
+                            f"Ошибка: {str(stats_error)}",
+                            parse_mode='HTML'
+                        )
             
             # Меню действий (используем короткие callback без темы)
             keyboard = [
