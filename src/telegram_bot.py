@@ -38,6 +38,46 @@ PRICING = {
     'cached': 0.0006
 }
 
+# Тарифы OpenAI (доллары за 1M токенов, официальные с platform.openai.com/docs/pricing)
+OPENAI_PRICING = {
+    'gpt-4o-mini': {
+        'input': 0.15 / 1_000_000,   # $0.15 per 1M tokens
+        'output': 0.60 / 1_000_000   # $0.60 per 1M tokens
+    },
+    'gpt-4o': {
+        'input': 2.50 / 1_000_000,   # $2.50 per 1M tokens
+        'output': 10.00 / 1_000_000  # $10.00 per 1M tokens
+    },
+    # gpt-5.x модели используют те же цены что и gpt-4o (топовые)
+    'gpt-5': {
+        'input': 2.50 / 1_000_000,
+        'output': 10.00 / 1_000_000
+    }
+}
+
+
+def get_openai_price(model: str, token_type: str) -> float:
+    """
+    Получить цену OpenAI для модели и типа токенов.
+    
+    Args:
+        model: название модели (например 'gpt-4o-mini', 'gpt-5.2')
+        token_type: 'input' или 'output'
+    
+    Returns:
+        Цена за токен в долларах
+    """
+    # Определяем ключ для словаря цен
+    if 'gpt-4o-mini' in model:
+        price_key = 'gpt-4o-mini'
+    elif 'gpt-5' in model:
+        price_key = 'gpt-5'
+    else:
+        # По умолчанию gpt-4o (средние цены)
+        price_key = 'gpt-4o'
+    
+    return OPENAI_PRICING[price_key][token_type]
+
 
 def acquire_lock():
     """Получить эксклюзивную блокировку для предотвращения множественных запусков"""
@@ -306,11 +346,9 @@ def format_token_stats(operation: str, usage: dict, user_id: int, model: str = N
 
     # Стоимость (для OpenAI показываем в долларах)
     if provider == 'openai':
-        # OpenAI pricing (за 1M токенов с официального сайта)
-        # gpt-4o-mini: $0.15 input, $0.60 output per 1M tokens
-        # gpt-4o: $2.50 input, $10.00 output per 1M tokens
-        openai_input_price = 0.15 / 1_000_000 if 'gpt-4o-mini' in (model or '') else 2.50 / 1_000_000
-        openai_output_price = 0.60 / 1_000_000 if 'gpt-4o-mini' in (model or '') else 10.00 / 1_000_000
+        # Используем централизованные цены
+        openai_input_price = get_openai_price(model or 'gpt-4o', 'input')
+        openai_output_price = get_openai_price(model or 'gpt-4o', 'output')
         cost_usd = (input_tokens * openai_input_price) + (output_tokens * openai_output_price)
         text += f"\n💰 <b>Стоимость запроса:</b> ~${cost_usd:.6f}\n"
     else:
@@ -323,11 +361,9 @@ def format_token_stats(operation: str, usage: dict, user_id: int, model: str = N
 
     # Накопительная статистика с правильной валютой
     if provider == 'openai':
-        # OpenAI pricing (за 1M токенов с официального сайта)
-        # gpt-4o-mini: $0.15 input, $0.60 output per 1M tokens
-        # gpt-4o: $2.50 input, $10.00 output per 1M tokens
-        openai_input_price = 0.15 / 1_000_000 if 'gpt-4o-mini' in (model or '') else 2.50 / 1_000_000
-        openai_output_price = 0.60 / 1_000_000 if 'gpt-4o-mini' in (model or '') else 10.00 / 1_000_000
+        # Используем централизованные цены
+        openai_input_price = get_openai_price(model or 'gpt-4o', 'input')
+        openai_output_price = get_openai_price(model or 'gpt-4o', 'output')
         total_session_cost_usd = (stats['total_input_tokens'] * openai_input_price) + (stats['total_output_tokens'] * openai_output_price)
         cost_display = f"~${total_session_cost_usd:.6f}"
     else:
@@ -819,11 +855,9 @@ class TelegramSMMBot:
             else:
                 # Расчет стоимости с правильной валютой
                 if provider == 'openai':
-                    # OpenAI pricing (за 1M токенов с официального сайта)
-                    # Используем цены gpt-4o как усредненные между gpt-4o-mini и топовыми моделями
-                    # gpt-4o: $2.50 input, $10.00 output per 1M tokens
-                    avg_input_price = 2.50 / 1_000_000
-                    avg_output_price = 10.00 / 1_000_000
+                    # Используем централизованные цены (gpt-4o как усредненные)
+                    avg_input_price = get_openai_price('gpt-4o', 'input')
+                    avg_output_price = get_openai_price('gpt-4o', 'output')
                     total_cost_usd = (stats['total_input_tokens'] * avg_input_price) + (stats['total_output_tokens'] * avg_output_price)
                     cost_text = f"~${total_cost_usd:.6f}"
                     currency = "$"
