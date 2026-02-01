@@ -974,12 +974,17 @@ class TelegramSMMBot:
         """Показывает меню настроек (callback version)"""
         user_id = query.from_user.id
         provider = get_user_ai_provider(user_id)
+        settings = get_user_settings(user_id)
         
         # Индикатор AI провайдера
         provider_display = "🧠 Yandex" if provider == 'yandex' else "🤖 OpenAI"
         
+        # Индикатор статистики
+        stats_display = "✅" if settings['show_token_stats'] else "❌"
+        
         text = f"⚙️ <b>НАСТРОЙКИ БОТА</b>\n\n"
         text += f"🤖 <b>AI Провайдер:</b> {provider_display}\n"
+        text += f"📊 <b>Выводить статистику:</b> {stats_display}\n"
         
         keyboard = [
             [InlineKeyboardButton("🤖 Выбрать AI модель", callback_data="choose_ai_provider")],
@@ -994,12 +999,17 @@ class TelegramSMMBot:
         """Показывает меню настроек (message version)"""
         user_id = update.effective_user.id
         provider = get_user_ai_provider(user_id)
+        settings = get_user_settings(user_id)
         
         # Индикатор AI провайдера
         provider_display = "🧠 Yandex" if provider == 'yandex' else "🤖 OpenAI"
         
+        # Индикатор статистики
+        stats_display = "✅" if settings['show_token_stats'] else "❌"
+        
         text = f"⚙️ <b>НАСТРОЙКИ БОТА</b>\n\n"
         text += f"🤖 <b>AI Провайдер:</b> {provider_display}\n"
+        text += f"📊 <b>Выводить статистику:</b> {stats_display}\n"
         
         keyboard = [
             [InlineKeyboardButton("🤖 Выбрать AI модель", callback_data="choose_ai_provider")],
