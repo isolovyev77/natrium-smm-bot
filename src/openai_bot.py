@@ -271,9 +271,6 @@ class OpenAIBot:
             # Безопасная обработка UTF-8
             user_prompt = user_prompt.encode('utf-8', errors='ignore').decode('utf-8')
             
-            # Комбинируем системный промпт с пользовательским
-            full_input = f"{self.system_prompt}\n\n{user_prompt}"
-            
             # Формируем список tools
             tools = []
             if self.vector_store_id and "file_search" in self.available_tools:
@@ -286,11 +283,16 @@ class OpenAIBot:
             logger.info(f"   Model: {selected_model}")
             logger.info(f"   Tools: {[t['type'] for t in tools] if tools else 'None'}")
             
-            # Responses API вызов
-            # NOTE: Responses API не поддерживает temperature и max_tokens
+            # Responses API вызов с правильными параметрами
+            # Responses API поддерживает: temperature, max_output_tokens (НЕ max_tokens!)
             api_params = {
                 'model': selected_model,
-                'input': full_input
+                'input': [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                'temperature': 0.7,
+                'max_output_tokens': 2000
             }
             
             # Добавляем tools только если они есть
