@@ -178,7 +178,9 @@ def get_user_ai_provider(user_id: int) -> str:
     Returns:
         'yandex' | 'openai'
     """
-    return USER_AI_PROVIDER.get(user_id, 'yandex')
+    provider = USER_AI_PROVIDER.get(user_id, 'yandex')
+    logger.debug(f"📖 get_user_ai_provider: user={user_id} → {provider}")
+    return provider
 
 
 def set_user_ai_provider(user_id: int, provider: str):
@@ -190,7 +192,9 @@ def set_user_ai_provider(user_id: int, provider: str):
         user_id: Telegram user ID
         provider: 'yandex' | 'openai'
     """
-    old_provider = USER_AI_PROVIDER.get(user_id)
+    old_provider = USER_AI_PROVIDER.get(user_id, 'yandex')
+    
+    logger.info(f"📝 set_user_ai_provider: user={user_id}, old={old_provider}, new={provider}")
     
     if old_provider != provider:
         # Сбрасываем статистику при смене провайдера
@@ -203,9 +207,12 @@ def set_user_ai_provider(user_id: int, provider: str):
                 'total_requests': 0,
                 'total_tokens': 0
             }
-        logger.info(f"👤 User {user_id}: {old_provider} → {provider}, stats reset")
+        logger.info(f"✅ User {user_id}: {old_provider} → {provider}, stats reset")
+    else:
+        logger.info(f"ℹ️ User {user_id}: Provider unchanged ({provider})")
     
     USER_AI_PROVIDER[user_id] = provider
+    logger.info(f"📊 Current USER_AI_PROVIDER state: {USER_AI_PROVIDER}")
 
 
 def get_user_stats(user_id: int) -> dict:
@@ -607,14 +614,15 @@ class TelegramSMMBot:
                 
                 # Роутинг на правильного провайдера
                 if provider == 'openai' and self.openai_bot:
-                    logger.info(f"👤 User {user_id}: Using OpenAI for themes")
+                    logger.info(f"👤 User {user_id}: Using OpenAI for themes (focus: {focus_type})")
                     themes, usage = self.openai_bot.generate_themes(
+                        technique=technique,
                         custom_input=custom_input,
                         previous_themes=all_previous_themes
                     )
                 else:
                     # Yandex (по умолчанию)
-                    logger.info(f"👤 User {user_id}: Using Yandex for themes")
+                    logger.info(f"👤 User {user_id}: Using Yandex for themes (focus: {focus_type})")
                     themes, usage = self.natrium_bot.generate_themes(
                         technique, 
                         custom_input=custom_input,
@@ -780,16 +788,20 @@ class TelegramSMMBot:
         # Установка Yandex провайдера
         elif data == "set_provider_yandex":
             user_id = query.from_user.id
+            old_provider = get_user_ai_provider(user_id)
             set_user_ai_provider(user_id, 'yandex')
+            logger.info(f"🔄 User {user_id}: Provider changed {old_provider} → yandex")
             await query.answer("✅ Провайдер изменён на Yandex", show_alert=True)
             await self.show_settings_menu(query, context)
         
         # Установка OpenAI провайдера
         elif data == "set_provider_openai":
             user_id = query.from_user.id
+            old_provider = get_user_ai_provider(user_id)
             
             # Проверяем доступность OpenAI
             if not self.openai_bot:
+                logger.warning(f"❌ User {user_id}: Tried to switch to OpenAI but it's unavailable")
                 await query.answer(
                     "❌ OpenAI недоступен\nПроверьте OPENAI_API_KEY в .env",
                     show_alert=True
@@ -797,6 +809,7 @@ class TelegramSMMBot:
                 return
             
             set_user_ai_provider(user_id, 'openai')
+            logger.info(f"🔄 User {user_id}: Provider changed {old_provider} → openai")
             await query.answer("✅ Провайдер изменён на OpenAI", show_alert=True)
             await self.show_settings_menu(query, context)
 
@@ -970,16 +983,18 @@ class TelegramSMMBot:
             user_id = query.from_user.id
             provider = get_user_ai_provider(user_id)
             
+            logger.info(f"🔍 Post generation: user={user_id}, provider={provider}, openai_bot_available={self.openai_bot is not None}")
+            
             # Роутинг на правильного провайдера
             if provider == 'openai' and self.openai_bot:
-                logger.info(f"👤 User {user_id}: Using OpenAI for post")
+                logger.info(f"👤 User {user_id}: Using OpenAI for post (theme: {theme_name[:30]}...)")
                 post, usage = self.openai_bot.generate_post(
                     theme=theme_name,
                     post_length=post_length
                 )
             else:
                 # Yandex (по умолчанию)
-                logger.info(f"👤 User {user_id}: Using Yandex for post")
+                logger.info(f"👤 User {user_id}: Using Yandex for post (theme: {theme_name[:30]}...)")
                 post, usage = self.natrium_bot.generate_post(
                     theme=theme_name,
                     technique=technique,
