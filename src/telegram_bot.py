@@ -364,12 +364,12 @@ class TelegramSMMBot:
         focus_text = "🎯 <b>НА ЧТО СДЕЛАТЬ УПОР В ТЕМАХ?</b>\n\nВыберите направление:"
         
         keyboard = [
-            [InlineKeyboardButton("🍽️ Питание и диета", callback_data="focus_nutrition")],
-            [InlineKeyboardButton("💪 Спорт и тренировки (CrossFit, силовые)", callback_data="focus_sport")],
-            [InlineKeyboardButton("💤 Сон и восстановление", callback_data="focus_sleep")],
-            [InlineKeyboardButton("🤸 Техника упражнений (гимнастика, атлетика)", callback_data="focus_technique")],
-            [InlineKeyboardButton("🏥 Здоровье и профилактика (ВОЗ)", callback_data="focus_health")],
-            [InlineKeyboardButton("🎲 Разное (без фокуса)", callback_data="focus_random")]
+            [InlineKeyboardButton("�️ Спорт и тренировки", callback_data="focus_sport")],
+            [InlineKeyboardButton("🥗 Питание и диета", callback_data="focus_nutrition")],
+            [InlineKeyboardButton("😴 Сон и восстановление", callback_data="focus_sleep")],
+            [InlineKeyboardButton("💪 Техника упражнений", callback_data="focus_technique")],
+            [InlineKeyboardButton("🔬 Наука и исследования", callback_data="focus_science")],
+            [InlineKeyboardButton("🎲 Разное (микс всех тем)", callback_data="focus_random")]
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -495,12 +495,12 @@ class TelegramSMMBot:
             focus_text = "🎯 <b>НА ЧТО СДЕЛАТЬ УПОР В НОВЫХ ТЕМАХ?</b>\n\nВыберите направление:"
             
             keyboard = [
-                [InlineKeyboardButton("🍽️ Питание и диета", callback_data="focus_nutrition")],
-                [InlineKeyboardButton("💪 Спорт и тренировки (CrossFit, силовые)", callback_data="focus_sport")],
-                [InlineKeyboardButton("💤 Сон и восстановление", callback_data="focus_sleep")],
-                [InlineKeyboardButton("🤸 Техника упражнений (гимнастика, атлетика)", callback_data="focus_technique")],
-                [InlineKeyboardButton("🏥 Здоровье и профилактика (ВОЗ)", callback_data="focus_health")],
-                [InlineKeyboardButton("🎲 Разное (без фокуса)", callback_data="focus_random")]
+                [InlineKeyboardButton("�️ Спорт и тренировки", callback_data="focus_sport")],
+                [InlineKeyboardButton("🥗 Питание и диета", callback_data="focus_nutrition")],
+                [InlineKeyboardButton("😴 Сон и восстановление", callback_data="focus_sleep")],
+                [InlineKeyboardButton("💪 Техника упражнений", callback_data="focus_technique")],
+                [InlineKeyboardButton("🔬 Наука и исследования", callback_data="focus_science")],
+                [InlineKeyboardButton("🎲 Разное (микс всех тем)", callback_data="focus_random")]
             ]
             
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -525,12 +525,12 @@ class TelegramSMMBot:
             
             # Мапинг фокуса на ключевые слова
             focus_map = {
-                "nutrition": "питание, диета, спортивное питание",
-                "sport": "спорт, тренировки, CrossFit, силовые упражнения, меткон",
-                "sleep": "сон, восстановление, регенерация",
-                "technique": "техника упражнений, гимнастика, олимпийская атлетика, прогрессии",
-                "health": "здоровье, профилактика, рекомендации ВОЗ, научные исследования",
-                "random": None  # без фокуса
+                "sport": "спорт, тренировки, CrossFit, силовые упражнения, меткон, гимнастика, атлетика",
+                "nutrition": "питание, диета, спортивное питание, БЖУ, калории, рацион атлета",
+                "sleep": "сон, восстановление, регенерация, отдых, циркадные ритмы",
+                "technique": "техника упражнений, прогрессии, движения, гимнастика, олимпийская атлетика, механика движений",
+                "science": "научные исследования, ВОЗ, PubMed, физиология, биомеханика, метаболизм, гормоны",
+                "random": None  # микс всех тем, без конкретного фокуса
             }
             
             focus_keywords = focus_map.get(focus_type)
