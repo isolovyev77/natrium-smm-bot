@@ -1,129 +1,119 @@
-# 🚀 Natrium SMM Bot
+# 🏋 Natrium SMM Bot
 
 ![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Status](https://img.shields.io/badge/status-active-success.svg)
+![Status](https://img.shields.io/badge/status-production-success.svg)
+![CI/CD](https://img.shields.io/badge/CI%2FCD-automated-blue.svg)
 
-**Telegram-бот для генерации контента для социальных сетей с использованием Yandex Cloud AI.**
+**Автоматический Telegram-бот для создания качественного контента с использованием Yandex Cloud AI Agent.**
 
-Проект использует **Yandex Foundation Models (YandexGPT)** и технику CoV+CoK (Chain of Verification + Chain of Knowledge) для создания качественных постов для фитнес-зала Натриум.
-
----
-
-## 🚀 Быстрый деплой на Oracle Cloud
-
-**Новое:** Автоматический CI/CD деплой при каждом push в `main`!
-
-### Для новой VM (Production Setup):
-- ⚡ [Быстрая установка VM](./VM_QUICK_INSTALL.md) - одна команда, 5-10 минут
-- 📋 [Полная инструкция VM](./VM_PRODUCTION_SETUP.md) - детальная подготовка Production VM
-
-### Для настройки CI/CD (на существующей VM):
-- ⚡ [Быстрая настройка CI/CD](./QUICK_CICD_SETUP.md) - настройка за 5 минут
-- 🤖 [Инструкции для Copilot](./COPILOT_CICD_SETUP.md) - подробная настройка с Deploy Key
-- 📚 [Навигация по документации](./CICD_INDEX.md) - все документы CI/CD
-
-### Альтернативные варианты:
-- 📖 [Быстрый старт деплоя](./DEPLOY_QUICK.md) - ручной деплой
-- 📚 [Полная документация](./DEPLOYMENT.md) - детальные инструкции
-
-**CI/CD Workflow:** Codespaces → GitHub Actions → Oracle VM (автоматически)
+Бот использует **Yandex Foundation Models (YandexGPT)** и технику CoV+CoK (Chain of Verification + Chain of Knowledge) для генерации экспертных постов о фитнесе, CrossFit и здоровье для зала Натриум Фитнесс.
 
 ---
 
-## ✨ Возможности
+## ✨ Основные возможности
 
-- 📝 **Автоматическая генерация тем** с фокусами (питание, спорт, сон, техника, здоровье)
-- ✍️ **Генерация готовых постов** — с эмодзи, буллетами, хештегами и призывом к действию
-- � **Кликабельные ссылки** — посты содержат работающие ссылки на PubMed, ВОЗ и другие источники (HTML форматирование)
-- �🔍 **Техника CoV+CoK** — проверка фактов через Chain-of-Verification и Chain-of-Knowledge
-- 🌐 **Web Search + FileSearch** — актуальные данные 2026 года (CrossFit Open, Games, ВОЗ)
-- 📚 **База знаний**:
-  - Книги по физиологии и программированию тренировок
-  - Официальные материалы CrossFit Level 1/2
-  - Гайды по созданию вирусного контента для соцсетей
-- 💾 **Сохранение истории** — все посты автоматически сохраняются в Markdown
-- 📊 **Статистика токенов** — отслеживание расхода API на генерацию
+### 🤖 Telegram интерфейс
+- **Генерация тем** — 10 актуальных идей с источниками одной кнопкой
+- **Фокусированный поиск** — темы по категориям: 🏋 Спорт, 🥗 Питание, 😴 Сон, 💪 Техника, 🔬 Наука, 🎲 Разное
+- **Генерация постов** — готовый контент с заголовком, лидом, секциями, CTA и хештегами
+- **Настройка длины** — от 200 до 1000 символов
+- **История** — просмотр всех сгенерированных постов
+
+### 🧠 AI технологии
+- **CoV+CoK** — Chain-of-Verification + Chain-of-Knowledge для проверки фактов
+- **Web Search** — актуальные данные 2026 года (CrossFit Open, Games, исследования)
+- **File Search** — база знаний из книг по физиологии, программированию тренировок, CrossFit Level 1/2
+- **Smart Prompting** — оптимизированные промпты для генерации вирусного контента
+
+### 📝 Качество контента
+- **Структура** — обязательный заголовок и лид-затравка для каждого поста
+- **Источники** — ссылки на PubMed, ВОЗ, CrossFit.com, научные исследования
+- **HTML форматирование** — кликабельные ссылки в Telegram
+- **Emoji и буллеты** — визуально привлекательный формат
+- **Хештеги** — релевантные теги для каждого поста
+
+### 🚀 CI/CD автоматизация
+- **GitHub Actions** — автодеплой при push в main
+- **Oracle Cloud VM** — production хостинг с systemd
+- **Health checks** — мониторинг работы бота
+- **Rolling updates** — обновления без даунтайма
 
 ---
 
-## 🚀 Быстрый старт
+## 🚀 Быстрый деплой
 
-### 1. Клонирование репозитория
+### Production на Oracle Cloud (рекомендуется)
+- ⚡ [Быстрая установка VM](./VM_QUICK_INSTALL.md) — одна команда, 5-10 минут
+- 📋 [Полная инструкция VM](./VM_PRODUCTION_SETUP.md) — детальная подготовка
+
+### Настройка CI/CD
+- ⚡ [Быстрая настройка CI/CD](./QUICK_CICD_SETUP.md) — настройка за 5 минут
+- 🤖 [Инструкции для Copilot](./COPILOT_CICD_SETUP.md) — подробная настройка с Deploy Key
+- 📚 [Навигация по документации](./CICD_INDEX.md) — все документы CI/CD
+
+### Альтернативные варианты
+- 📖 [Быстрый старт деплоя](./DEPLOY_QUICK.md) — ручной деплой
+- 📚 [Полная документация](./DEPLOYMENT.md) — детальные инструкции
+
+**Workflow:** GitHub Codespaces → GitHub Actions → Oracle VM (автоматически)
+
+---
+
+## 🏁 Быстрый старт
+
+### 1. Получите API ключи
+
+**Yandex Cloud:**
+1. Перейдите в [Yandex Cloud Console](https://console.yandex.cloud)
+2. Создайте API ключ в разделе **Сервисные аккаунты**
+3. Создайте AI Agent в **Foundation Models** → **Agents**
+4. Загрузите системный промпт из [prompts/agent_system_prompt.md](prompts/agent_system_prompt.md)
+5. Создайте File Search индекс и загрузите PDF из `data/`
+
+**Telegram:**
+1. Откройте [@BotFather](https://t.me/botfather)
+2. Создайте бота командой `/newbot`
+3. Сохраните токен
+
+### 2. Локальный запуск (разработка)
 
 ```bash
+# Клонирование
 git clone https://github.com/isolovyev77/natrium-smm-bot.git
 cd natrium-smm-bot
-```
 
-### 2. Установка зависимостей
-
-```bash
-# Создайте виртуальное окружение
+# Виртуальное окружение
 python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate   # Windows
 
-# Активируйте его
-source .venv/bin/activate  # На macOS/Linux
-# или
-.venv\Scripts\activate  # На Windows
-
-# Установите зависимости
+# Зависимости
 pip install -r requirements.txt
-```
 
-### 3. Настройка переменных окружения
-
-Скопируйте `.env.example` в `.env`:
-
-```bash
+# Настройка .env
 cp .env.example .env
+# Отредактируйте .env своими ключами
+
+# Запуск бота
+python src/telegram_bot.py
 ```
 
-Заполните `.env` своими данными:
+### 3. Production деплой (Oracle Cloud)
 
-```env
-# Yandex Cloud
-YANDEX_FOLDER_ID=b1gxxxxxxxxxxxxx
-YANDEX_API_KEY=AQVNxxxxxxxxxxxxxxxxxxxx
-YANDEX_AGENT_ID=fvtxxxxxxxxxxxxxxxxxxxx
-
-# Telegram (опционально, для будущей версии)
-TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
-
-# Логирование
-LOG_LEVEL=INFO
-```
-
-**Где получить ключи:**
-
-| Параметр | Как получить |
-|----------|-------------|
-| `YANDEX_FOLDER_ID` | [Yandex Cloud Console](https://console.yandex.cloud) → Ваш каталог → ID |
-| `YANDEX_API_KEY` | Console → **API ключи** → Создать ключ |
-| `YANDEX_AGENT_ID` | Console → **Foundation Models** → **Agents** → ID вашего агента |
-| `TELEGRAM_BOT_TOKEN` | Telegram → [@BotFather](https://t.me/botfather) → `/newbot` |
-
-### 4. Настройка Yandex AI Agent
-
-В веб-интерфейсе [Yandex Cloud](https://console.yandex.cloud/folders):
-
-1. Перейдите в **Foundation Models** → **Agents**
-2. Создайте нового агента или откройте существующего
-3. Загрузите системный промпт из файла `prompts/agent_system_prompt.md`
-4. Создайте **File Search** индекс и загрузите файлы из папки `data/`
-5. Скопируйте **Agent ID** в `.env`
-
-### 5. Запуск программы
+Полная инструкция: [VM_QUICK_INSTALL.md](./VM_QUICK_INSTALL.md)
 
 ```bash
-# Из корня проекта
-python src/main.py
+# На VM выполните автоматическую установку
+curl -fsSL https://raw.githubusercontent.com/isolovyev77/natrium-smm-bot/main/scripts/vm_prod_setup_script.sh | bash
 ```
 
-Программа запросит:
-- Технику промптинга (1-3)
-- Выбор темы из сгенерированного списка
-- Длину поста (200-1000 символов)
+Скрипт автоматически:
+- Установит зависимости (Python, Git, systemd)
+- Склонирует репозиторий
+- Настроит .env (интерактивно)
+- Запустит бота как systemd сервис
+- Настроит автозапуск при перезагрузке
 
 ---
 
@@ -131,98 +121,225 @@ python src/main.py
 
 ```
 natrium-smm-bot/
-├── src/
-│   ├── main.py              # Основная логика программы
-│   ├── bot.py               # Взаимодействие с Yandex AI API
-│   └── post_generator.py    # Генерация и сохранение постов
-├── data/                    # База знаний (книги, материалы)
-│   ├── sources.md           # Индекс источников
-│   └── *.pdf                # PDF-файлы для File Search
-├── prompts/
-│   ├── agent_system_prompt.md
-│   └── README.md            # Документация промптов
-├── output/                  # Сгенерированные посты
-├── documentation/           # Дополнительная документация
-├── .env.example             # Шаблон переменных окружения
-├── .gitignore
-├── requirements.txt
-└── README.md
+├── src/                        # Исходный код
+│   ├── telegram_bot.py        # Telegram бот (главный файл)
+│   ├── bot.py                 # Yandex API клиент
+│   ├── config.py              # Конфигурация
+│   ├── prompts.py             # Промпты для генерации
+│   └── parsers/               # Парсеры ответов API
+│       └── local_parser.py
+├── prompts/                   # Системные промпты
+│   ├── agent_system_prompt.md # Основной промпт для Agent
+│   └── README.md
+├── data/                      # База знаний (PDF)
+│   └── sources.md            # Список источников
+├── output/posts/             # Сгенерированные посты
+│   └── archive/              # Архив постов
+├── scripts/                  # Скрипты деплоя
+│   ├── vm_prod_setup_script.sh
+│   └── setup_deploy_key.sh
+├── .github/workflows/        # CI/CD
+│   └── deploy.yml
+├── .env.example              # Шаблон переменных окружения
+├── requirements.txt          # Python зависимости
+├── natrium-smm-bot.service  # systemd unit
+└── README.md                # Эта документация
 ```
 
 ---
 
-## 🎯 Как использовать
+## 🎯 Использование Telegram бота
 
-### Генерация поста
+### Основные команды
 
-1. Запустите `python src/main.py`
-2. Выберите технику промптинга:
-   - `1` — zero_shot (быстро)
-   - `2` — cov+cok (качественно, с фактчекингом)
-   - `3` — few_shot (с примерами)
-3. Выберите тему из списка (1-10) или введите свою
-4. Укажите желаемую длину поста (по умолчанию 500 символов)
-5. Пост сохранится в `output/generated_post_YYYYMMDD_HHMMSS.md`
+- `/start` — начало работы, показывает главное меню
+- `/help` — справка по использованию
+- `/history` — просмотр всех сгенерированных постов
+
+### Процесс создания поста
+
+1. **Генерация тем** — нажмите "📝 Сгенерировать темы"
+   - Выберите фокус: 🏋 Спорт, 🥗 Питание, 😴 Сон, 💪 Техника, 🔬 Наука, 🎲 Разное
+   - Получите 10 актуальных идей с источниками
+
+2. **Выбор темы** — нажмите на интересующую тему
+   - Или введите свою тему текстом
+
+3. **Настройка длины** — выберите формат:
+   - 📏 Короткий (200-300 символов)
+   - 📄 Средний (400-600 символов)
+   - 📰 Длинный (700-1000 символов)
+
+4. **Получение поста** — бот сгенерирует готовый контент
+   - Заголовок в CAPS с эмодзи
+   - Лид-затравка для привлечения внимания
+   - Секции с фактами и источниками
+   - CTA и хештеги
 
 ### Пример сгенерированного поста
 
-```markdown
-💪 РАЗМИНКА: НЕ «ТРАТА СИЛ», А КЛЮЧ К РЕЗУЛЬТАТУ
+```
+🔥 **РЕГЕНЕРАЦИЯ: СЕКРЕТ ПОСТОЯННОГО ПРОГРЕССА**
 
-Часто слышу: «Зачем долго разминаться? Я устану!» Разберёмся, почему это заблуждение.
+Знакомо: после убойной тренировки не можешь пошевелиться два дня? 
+Многие думают, что это нормально. На самом деле правильное 
+восстановление - это 50% успеха.
 
-⚡️ Что происходит во время врабатывания?
+🔥 **ФАКТОРЫ РЕГЕНЕРАЦИИ:**
+• Качественный сон 7-9 часов — время роста мышц (WHO)
+• Питание в течение 30 минут после — закрытие углеводного окна
+• Активное восстановление — легкое кардио ускоряет вывод лактата
 
-🔥 Повышение температуры мышц – рост на 2°C ускоряет сокращение до 20%
-💓 Активация кровообращения – кислорода в десятки раз больше
-🧠 Настройка нервной системы – координация улучшается
+💓 **В НАТРИУМ:**
+Используем протоколы восстановления от CrossFit HQ:
+✅ Foam rolling после WOD
+✅ Стретчинг 10-15 минут
+✅ Контроль пульса при восстановлении
 
-✅ Вывод: разминка – инвестиция в результат!
+Восстанавливайся правильно — прогрессируй быстрее! 🔥
 
-Разминайтесь правильно – тренируйтесь эффективно! 🔥
-
-#натриумфитнес #кроссфит #разминка
+#натриумфитнес #crossfit #восстановление #регенерация
 ```
 
 ---
 
-## 📊 Техники промптинга
+## � Технологии и архитектура
 
-| Техника | Описание | Скорость | Качество | Токены |
-|---------|----------|----------|----------|--------|
-| **zero_shot** | Простой запрос без примеров | ⚡️⚡️⚡️ | ⭐️⭐️⭐️ | ~5K |
-| **cov+cok** | Chain-of-Verification + Chain-of-Knowledge | ⚡️⚡️ | ⭐️⭐️⭐️⭐️⭐️ | ~7K |
-| **few_shot** | Обучение на примерах успешных постов | ⚡️ | ⭐️⭐️⭐️⭐️ | ~6K |
+### Backend
+- **Python 3.12+** — основной язык
+- **httpx** — асинхронные HTTP запросы к Yandex API
+- **python-telegram-bot** — Telegram Bot API
+- **python-dotenv** — управление переменными окружения
+
+### AI платформа
+- **Yandex Foundation Models** — YandexGPT для генерации текста
+- **Yandex AI Agent** — оркестрация промптов и инструментов
+- **Web Search** — актуальная информация из интернета
+- **File Search** — поиск по базе знаний (PDF документы)
+
+### DevOps
+- **GitHub Actions** — CI/CD pipeline
+- **Oracle Cloud** — production хостинг (Always Free Tier)
+- **systemd** — управление сервисом
+- **SSH Deploy** — безопасный деплой через SSH ключи
+
+### Промпт-инжиниринг
+- **CoV (Chain-of-Verification)** — верификация фактов через источники
+- **CoK (Chain-of-Knowledge)** — связывание знаний из базы
+- **Structured prompts** — четкая структура ввода/вывода
+- **Few-shot learning** — обучение на примерах постов
 
 ---
 
-## 🤝 Contributing
+## 🔧 Конфигурация
 
-Мы рады вкладу в проект! Если у вас есть идеи или вы нашли баг:
+### Переменные окружения (.env)
 
-1. **Fork** репозитория
+```env
+# Yandex Cloud
+YANDEX_FOLDER_ID=b1g...         # ID каталога
+YANDEX_API_KEY=AQVN...          # API ключ сервисного аккаунта
+YANDEX_AGENT_ID=fvt...          # ID AI Agent
+
+# Telegram
+TELEGRAM_BOT_TOKEN=1234567890:ABC...  # Токен от @BotFather
+
+# Опционально
+LOG_LEVEL=INFO                  # DEBUG, INFO, WARNING, ERROR
+```
+
+### Системный промпт
+
+Основной промпт находится в [prompts/agent_system_prompt.md](prompts/agent_system_prompt.md).
+
+**Ключевые элементы:**
+- Роль эксперта по CrossFit и физиологии
+- Обязательная структура: заголовок → лид → секции → CTA
+- Требование источников для всех фактов
+- Форматирование: эмодзи, буллеты, **жирный текст**
+- Хештеги и призыв к действию
+
+**Обновление промпта:**
+```python
+from src.bot import NatriumBot
+bot = NatriumBot()
+bot.update_agent_prompt()  # Загрузит из prompts/agent_system_prompt.md
+```
+
+---
+
+## 📊 Мониторинг и логи
+
+### Просмотр логов (systemd)
+
+```bash
+# Последние 100 строк
+journalctl -u natrium-smm-bot -n 100
+
+# Следить за логами в реальном времени
+journalctl -u natrium-smm-bot -f
+
+# Логи за сегодня
+journalctl -u natrium-smm-bot --since today
+```
+
+### Управление сервисом
+
+```bash
+# Статус
+sudo systemctl status natrium-smm-bot
+
+# Перезапуск
+sudo systemctl restart natrium-smm-bot
+
+# Остановка
+sudo systemctl stop natrium-smm-bot
+
+# Запуск
+sudo systemctl start natrium-smm-bot
+```
+
+### Проверка работоспособности
+
+```bash
+# Проверка подключения к API
+cd /opt/natrium-smm-bot
+source venv/bin/activate
+python -c "from src.bot import NatriumBot; bot = NatriumBot(); print('✅ OK')"
+```
+
+---
+
+## 🤝 Участие в разработке
+
+Приветствуем ваш вклад! См. [CONTRIBUTING.md](./CONTRIBUTING.md) для деталей.
+
+### Процесс
+1. Fork репозитория
 2. Создайте ветку: `git checkout -b feature/amazing-feature`
-3. Commit изменений: `git commit -m 'Add amazing feature'`
+3. Commit изменений: `git commit -m 'feat: add amazing feature'`
 4. Push в ветку: `git push origin feature/amazing-feature`
-5. Откройте **Pull Request**
+5. Откройте Pull Request
+
+### Changelog
+Все изменения документируются в [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
-## 📝 Roadmap
+## 📝 Документация
 
-- [x] Консольная версия с тремя техниками промптинга
-- [x] Подсчет статистики токенов
-- [ ] Telegram-бот интерфейс
-- [ ] Планирование постов (календарь контента)
-- [ ] Генерация изображений через Kandinsky 3.0
-- [ ] Автопубликация в Telegram/VK/Instagram
-- [ ] Web-интерфейс для управления
+- 📖 [README.md](./README.md) — основная документация (этот файл)
+- 🚀 [DEPLOYMENT.md](./DEPLOYMENT.md) — детальные инструкции по деплою
+- ⚡ [QUICK_CICD_SETUP.md](./QUICK_CICD_SETUP.md) — быстрая настройка CI/CD
+- 🏗️ [CICD_ARCHITECTURE.md](./CICD_ARCHITECTURE.md) — архитектура CI/CD
+- 📊 [CHANGELOG.md](./CHANGELOG.md) — история изменений
+- 🤝 [CONTRIBUTING.md](./CONTRIBUTING.md) — гайд для контрибьюторов
 
 ---
 
 ## 📄 Лицензия
 
-Проект распространяется под лицензией **MIT License**. Подробности в файле [LICENSE](LICENSE).
+Проект распространяется под лицензией **MIT**. См. [LICENSE](./LICENSE).
 
 ---
 
@@ -230,167 +347,24 @@ natrium-smm-bot/
 
 **Ivan Solovyev** ([@isolovyev77](https://github.com/isolovyev77))
 
-Проект создан как учебный для курса по промптингу и работе с LLM.
+Проект создан для автоматизации SMM контента фитнес-зала Натриум Фитнесс.
 
 ---
 
 ## 🙏 Благодарности
 
-- [Yandex Cloud](https://yandex.cloud) за Foundation Models API
-- Команде [CrossFit](https://crossfit.com) за методологию
-- Натриум Фитнесс за вдохновение
+- [Yandex Cloud](https://yandex.cloud) — Foundation Models API
+- [CrossFit](https://crossfit.com) — методология тренировок
+- [Oracle Cloud](https://www.oracle.com/cloud/free/) — бесплатный хостинг
+- Натриум Фитнесс — вдохновение и поддержка
 
 ---
 
-## 📞 Контакты
+## 📞 Поддержка
 
 - **Issues**: [GitHub Issues](https://github.com/isolovyev77/natrium-smm-bot/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/isolovyev77/natrium-smm-bot/discussions)
 
 ---
 
-*Последнее обновление: январь 2026*
-
-```bash
-# Скопировать в буфер обмена
-cat prompts/agent_system_prompt.md | pbcopy
-
-# Затем вставить в Yandex Agent через веб-интерфейс
-```
-
-### 4. Запуск
-
-```bash
-python src/main.py
-```
-
----
-
-## 📖 Документация
-
-**Главный документ**: [`documentation/COMPLETE_SUMMARY.md`](documentation/COMPLETE_SUMMARY.md) ⭐
-
-Полная документация по всем доработкам находится в папке [`documentation/`](documentation/):
-- `UTF8_FULL_FIX.md` — исправление ошибок UTF-8
-- `CREATIVITY_FIX.md` — разнообразие тем
-- `MENU_LOOP_FIX.md` — меню "Что делать дальше?"
-- `SMM_BOOK_ADDED.md` — интеграция книги о соцсетях
-- И другие...
-
----
-
-## 🗂 Структура проекта
-
-```
-NatriumSMM/
-├── src/
-│   ├── bot.py              # Класс NatriumBot (API, генерация)
-│   └── main.py             # Точка входа (CLI)
-├── prompts/
-│   ├── agent_system_prompt.md  # Системный промпт для Yandex Agent
-│   └── README.md
-├── data/
-│   └── sources.md          # Список материалов в FileSearch
-├── output/
-│   └── posts/              # Сгенерированные посты
-├── documentation/          # Вся документация проекта
-│   ├── README.md           # Навигация по документации
-│   └── COMPLETE_SUMMARY.md # ⭐ Полная сводка
-├── .env                    # API ключи (НЕ коммитить!)
-├── .env.example            # Пример файла .env
-├── requirements.txt        # Python зависимости
-├── diagnostics.py          # Проверка подключения к API
-└── README.md               # Этот файл
-```
-
----
-
-## 🎯 Использование
-
-### Выбор техники промптинга
-
-При запуске программа предложит выбрать технику:
-1. **zero_shot** — быстрая генерация (без проверки фактов)
-2. **cov+cok** — с проверкой фактов и источниками ✅ рекомендуется
-3. **few_shot** — с примерами из базы знаний
-
-### Генерация тем
-
-Программа автоматически сгенерирует **10 актуальных тем** с вирусными форматами:
-- Вопросы-хуки
-- Мифы и их разрушение
-- Кейсы и истории
-- Челленджи
-- Тесты и квизы
-
-### Выбор темы
-
-- Введите **номер темы** (1-10)
-- Или **свою тему** (например: "миф о перетренированности")
-- Или **"новые"** для генерации новых тем
-
-### Генерация поста
-
-Программа сгенерирует готовый пост с:
-- Заголовком в CAPS
-- Буллетами и эмодзи
-- Источниками (для CoV+CoK)
-- Призывом к действию
-- Хештегами
-
-### Следующие действия
-
-После генерации поста доступны:
-1. **Закончить работу**
-2. **Новый пост на ту же тему** (без повторного выбора темы)
-3. **Пост на другую тему** (из текущего списка)
-4. **Новый список тем** (с фокусом на питание/спорт/сон/технику/здоровье)
-
----
-
-## 🛠 Устранение неполадок
-
-### Ошибка: "Module not found"
-```bash
-pip install -r requirements.txt
-```
-
-### Ошибка: "API key not found"
-Проверьте файл `.env` — должны быть указаны все три ключа.
-
-### Ошибка: "Permission denied"
-Проверьте права доступа к каталогу в Yandex Cloud:
-- Роль: `ai.editor` или выше
-- Привязана карта для оплаты
-
-### Проверка подключения к API
-```bash
-python diagnostics.py
-```
-
----
-
-## 📊 Статус проекта
-
-**Версия**: 1.0 (стабильная)  
-**Дата**: 25 января 2026  
-**Статус**: ✅ **Готов к использованию**
-
-**Все проблемы решены**:
-- ✅ UTF-8 ошибки исправлены
-- ✅ Темы разнообразные и креативные
-- ✅ Меню работает корректно
-- ✅ Парсинг тем работает
-- ✅ Книга о соцсетях используется
-- ✅ Техники промптинга применяются
-
----
-
-## 📄 Лицензия
-
-MIT License
-
----
-
-**Успешной работы с ботом!** 🚀
-# Deployment test Wed Jan 28 23:42:27 UTC 2026
+*Последнее обновление: февраль 2026*
