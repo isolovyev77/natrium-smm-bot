@@ -229,7 +229,7 @@ def get_user_stats(user_id: int) -> dict:
     return USER_SESSION_STATS[user_id]
 
 
-def format_token_stats(operation: str, usage: dict, user_id: int) -> str:
+def format_token_stats(operation: str, usage: dict, user_id: int, model: str = None, provider: str = 'yandex') -> str:
     """Форматирует статистику токенов для отправки в Telegram (HTML формат)"""
     if not usage:
         return ""
@@ -267,6 +267,8 @@ def format_token_stats(operation: str, usage: dict, user_id: int) -> str:
 
     # Формируем текст статистики в HTML формате
     text = f"📊 <b>{operation}</b>\n"
+    if model:
+        text += f"Модель: <b>{model}</b>\n"
     text += f"\n🔢 <b>Токены текущего запроса:</b>\n"
     text += f"   • Входные: {input_tokens}\n"
     if cached_tokens > 0:
@@ -288,13 +290,20 @@ def format_token_stats(operation: str, usage: dict, user_id: int) -> str:
         else:
             text += " (оптимально)\n"
 
-    # Стоимость
-    text += f"\n💰 <b>Стоимость запроса:</b> ~{total_cost:.4f} ₽"
-    if cached_tokens > 0:
-        saved = (cached_tokens / 1000 * (PRICING['input'] - PRICING['cached']))
-        text += f" (экономия: {saved:.4f} ₽)\n"
+    # Стоимость (для OpenAI показываем в долларах)
+    if provider == 'openai':
+        # OpenAI pricing (примерные цены)
+        openai_input_price = 0.000003 if 'gpt-4o-mini' in (model or '') else 0.00003
+        openai_output_price = 0.000006 if 'gpt-4o-mini' in (model or '') else 0.00015
+        cost_usd = (input_tokens * openai_input_price) + (output_tokens * openai_output_price)
+        text += f"\n💰 <b>Стоимость запроса:</b> ~${cost_usd:.6f}\n"
     else:
-        text += "\n"
+        text += f"\n💰 <b>Стоимость запроса:</b> ~{total_cost:.4f} ₽"
+        if cached_tokens > 0:
+            saved = (cached_tokens / 1000 * (PRICING['input'] - PRICING['cached']))
+            text += f" (экономия: {saved:.4f} ₽)\n"
+        else:
+            text += "\n"
 
     # Накопительная статистика
     total_session_cost = (
@@ -593,8 +602,18 @@ class TelegramSMMBot:
             focus_keywords = focus_map.get(focus_type)
             technique = context.user_data.get('technique', 'cov+cok')
             
+            # Получаем выбранный AI провайдер для отображения модели
+            user_id = query.from_user.id
+            provider = get_user_ai_provider(user_id)
+            
+            # Определяем какая модель будет использоваться
+            if provider == 'openai' and self.openai_bot:
+                model_display = f"({self.openai_bot.themes_model})"
+            else:
+                model_display = "(YandexGPT)"
+            
             await query.edit_message_text(
-                "🔄 Генерирую новые темы...",
+                f"🔄 Генерирую новые темы {model_display}...",
                 parse_mode='HTML'
             )
             
@@ -607,10 +626,6 @@ class TelegramSMMBot:
                     custom_input = f"Сгенерируй 10 актуальных тем для постов с ФОКУСОМ НА: {focus_keywords}. Обязательно используй разнообразные форматы из книги о соцсетях!"
                 else:
                     custom_input = None
-                
-                # Получаем выбранный AI провайдер
-                user_id = query.from_user.id
-                provider = get_user_ai_provider(user_id)
                 
                 # Роутинг на правильного провайдера
                 if provider == 'openai' and self.openai_bot:
@@ -670,7 +685,12 @@ class TelegramSMMBot:
                     user_id = query.from_user.id
                     settings = get_user_settings(user_id)
                     if settings['show_token_stats']:
-                        stats_text = format_token_stats("Генерация тем", usage, user_id)
+                        # Определяем модель для статистики
+                        if provider == 'openai' and self.openai_bot:
+                            model_for_stats = self.openai_bot.themes_model
+                        else:
+                            model_for_stats = "YandexGPT"
+                        stats_text = format_token_stats("Генерация тем", usage, user_id, model=model_for_stats, provider=provider)
                         await query.message.reply_text(stats_text, parse_mode='HTML')
                     
             except Exception as e:
@@ -971,17 +991,29 @@ class TelegramSMMBot:
 
     async def generate_post_callback(self, query, theme_name: str, technique: str, post_length: int):
         """Генерирует пост и отправляет пользователю"""
+        # Получаем выбранный AI провайдер для отображения модели
+        user_id = query.from_user.id
+        provider = get_user_ai_provider(user_id)
+        
+        # Определяем какая модель будет использоваться
+        if provider == 'openai' and self.openai_bot:
+            model_display = f"({self.openai_bot.post_model})"
+            model_name = self.openai_bot.post_model
+        else:
+            model_display = "(YandexGPT)"
+            model_name = "YandexGPT"
+        
         await query.edit_message_text(
-            f"✍️ Генерирую пост на тему: <b>{theme_name}</b>\n"
+            f"✍️ Генерирую пост {model_display} на тему: <b>{theme_name}</b>\n"
             f"📊 Длина: {post_length} символов\n\n"
             f"⏳ Пожалуйста, подождите...",
             parse_mode='HTML'
         )
         
+        # Сохраняем модель в context для использования в статистике
+        context = query._bot_data if hasattr(query, '_bot_data') else {}
+        
         try:
-            # Получаем выбранный AI провайдер
-            user_id = query.from_user.id
-            provider = get_user_ai_provider(user_id)
             
             logger.info(f"🔍 Post generation: user={user_id}, provider={provider}, openai_bot_available={self.openai_bot is not None}")
             
@@ -1200,7 +1232,7 @@ class TelegramSMMBot:
                 user_id = query.from_user.id
                 settings = get_user_settings(user_id)
                 if settings['show_token_stats']:
-                    stats_text = format_token_stats("Генерация поста", usage, user_id)
+                    stats_text = format_token_stats("Генерация поста", usage, user_id, model=model_name, provider=provider)
                     await query.message.reply_text(stats_text, parse_mode='HTML')
             
             # Меню действий (используем короткие callback без темы)
