@@ -3,6 +3,9 @@ requests==2.32.3
 python-dotenv==1.0.1
 httpx>=0.25.0
 
+# AI providers
+openai>=1.54.0  # OpenAI API + Assistants + Vector Stores
+
 # PDF processing (для работы с базой знаний)
 PyMuPDF==1.24.1
 

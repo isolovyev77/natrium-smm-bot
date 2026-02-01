@@ -13,7 +13,7 @@
 - CFJ_English_Level1_TrainingGuide_compressed.pdf
 - LessonPlan_Compilation_compressed.pdf
 - sme_gymnastics_20160927_compressed.pdf
-- Скрининг - инструкции.docx
+- Скрининг - инструкции.pdf
 
 ## Дополнительные источники
 - Большая_книга_о_соцсетях_для_предпринимателей__экспертов_и_блогеров_compressed.pdf
