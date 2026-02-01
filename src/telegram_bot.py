@@ -815,9 +815,12 @@ class TelegramSMMBot:
             else:
                 # Расчет стоимости с правильной валютой
                 if provider == 'openai':
-                    # Примерная цена для OpenAI (может быть смесь моделей в сессии)
-                    avg_input_price = 0.000003  # усредненная между gpt-4o-mini и gpt-5.2
-                    avg_output_price = 0.000015
+                    # ВАЖНО: Используем цены для gpt-5.2 (самая дорогая модель в пайплайне)
+                    # gpt-4o-mini: $0.000003 input, $0.000006 output (темы)
+                    # gpt-5.2: $0.00003 input, $0.00015 output (посты)
+                    # Посты генерируются чаще, поэтому используем цены gpt-5.2
+                    avg_input_price = 0.00003  # цена gpt-5.2
+                    avg_output_price = 0.00015  # цена gpt-5.2
                     total_cost_usd = (stats['total_input_tokens'] * avg_input_price) + (stats['total_output_tokens'] * avg_output_price)
                     cost_text = f"~${total_cost_usd:.6f}"
                     currency = "$"
