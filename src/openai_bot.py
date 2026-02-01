@@ -287,12 +287,11 @@ class OpenAIBot:
             logger.info(f"   Tools: {[t['type'] for t in tools] if tools else 'None'}")
             
             # Responses API вызов
+            # NOTE: Responses API не поддерживает temperature и max_tokens
             response = self.client.responses.create(
                 model=selected_model,
                 input=full_input,
-                tools=tools if tools else None,
-                temperature=0.7,
-                max_tokens=2000
+                tools=tools if tools else None
             )
             
             # Извлекаем результат
