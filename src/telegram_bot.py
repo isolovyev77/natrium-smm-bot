@@ -229,6 +229,20 @@ def get_user_stats(user_id: int) -> dict:
     return USER_SESSION_STATS[user_id]
 
 
+def fix_common_typos(text: str) -> str:
+    """Исправляет типичные ошибки в сгенерированном тексте"""
+    replacements = {
+        'МЕТАКОНЕ': 'МЕТКОНЕ',
+        'метаконе': 'метконе',
+        'Метаконе': 'Метконе',
+    }
+    
+    for wrong, correct in replacements.items():
+        text = text.replace(wrong, correct)
+    
+    return text
+
+
 def format_token_stats(operation: str, usage: dict, user_id: int, model: str = None, provider: str = 'yandex') -> str:
     """Форматирует статистику токенов для отправки в Telegram (HTML формат)"""
     if not usage:
@@ -1024,6 +1038,9 @@ class TelegramSMMBot:
         """Парсит список тем из текста (берет последние 10 если есть дубликаты)"""
         import re
         
+        # СНАЧАЛА исправляем типичные опечатки в исходном тексте
+        themes_text = fix_common_typos(themes_text)
+        
         themes = []
         # Ищем темы с разными форматами нумерации
         patterns = [
@@ -1290,6 +1307,10 @@ class TelegramSMMBot:
             
             # HTML конвертация уже выполнена ВЫШЕ (до обработки источников)
             # Это важно для сохранения правильных ссылок [text](URL) → <a href="URL">text</a>
+            
+            # ИСПРАВЛЕНИЕ ТИПИЧНЫХ ОПЕЧАТОК
+            post = fix_common_typos(post)
+            logger.info(f"Fixed common typos (МЕТАКОНЕ → МЕТКОНЕ, etc.)")
             
             # ФИНАЛЬНОЕ ЛОГИРОВАНИЕ перед отправкой в Telegram
             logger.info(f"===== FINAL TEXT SENT TO TELEGRAM =====")
