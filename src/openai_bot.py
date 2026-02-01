@@ -288,11 +288,16 @@ class OpenAIBot:
             
             # Responses API вызов
             # NOTE: Responses API не поддерживает temperature и max_tokens
-            response = self.client.responses.create(
-                model=selected_model,
-                input=full_input,
-                tools=tools if tools else None
-            )
+            api_params = {
+                'model': selected_model,
+                'input': full_input
+            }
+            
+            # Добавляем tools только если они есть
+            if tools:
+                api_params['tools'] = tools
+            
+            response = self.client.responses.create(**api_params)
             
             # Извлекаем результат
             result = response.output_text.strip()
