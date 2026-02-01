@@ -306,9 +306,11 @@ def format_token_stats(operation: str, usage: dict, user_id: int, model: str = N
 
     # Стоимость (для OpenAI показываем в долларах)
     if provider == 'openai':
-        # OpenAI pricing (примерные цены)
-        openai_input_price = 0.000003 if 'gpt-4o-mini' in (model or '') else 0.00003
-        openai_output_price = 0.000006 if 'gpt-4o-mini' in (model or '') else 0.00015
+        # OpenAI pricing (за 1M токенов с официального сайта)
+        # gpt-4o-mini: $0.15 input, $0.60 output per 1M tokens
+        # gpt-4o: $2.50 input, $10.00 output per 1M tokens
+        openai_input_price = 0.15 / 1_000_000 if 'gpt-4o-mini' in (model or '') else 2.50 / 1_000_000
+        openai_output_price = 0.60 / 1_000_000 if 'gpt-4o-mini' in (model or '') else 10.00 / 1_000_000
         cost_usd = (input_tokens * openai_input_price) + (output_tokens * openai_output_price)
         text += f"\n💰 <b>Стоимость запроса:</b> ~${cost_usd:.6f}\n"
     else:
