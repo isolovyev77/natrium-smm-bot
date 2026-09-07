@@ -543,6 +543,7 @@ def test_root_dashboard_flag_and_start_failure_never_expose_broken_web_button(mo
     assert bot.nutrition.dashboard_origin == ""
     trainer_update = make_update(user_id=TRAINER_ID, callback_data="nutrition:trainer")
     run(bot.nutrition._show_trainer_clients(trainer_update))
+    assert "постоянный код" in trainer_update.callback_query.edits[-1][0]
     markup = trainer_update.callback_query.edits[-1][1]["reply_markup"]
     assert all(button.web_app is None for row in markup.inline_keyboard for button in row)
 

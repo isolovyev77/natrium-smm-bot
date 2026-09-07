@@ -1332,7 +1332,7 @@ class NutritionBotController:
         keyboard.append([InlineKeyboardButton("⬅️ В дневник", callback_data="nutrition:menu")])
         message = "👥 <b>Клиенты тренера</b>"
         if not clients:
-            message += "\n\nПока нет привязанных клиентов. Создайте одноразовый код."
+            message += "\n\nПока нет привязанных клиентов. Покажите постоянный код клиенту."
         await update.callback_query.edit_message_text(
             message, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard)
         )
