@@ -239,7 +239,10 @@ def test_photo_requires_consent_and_revoke_removes_it(store):
 
     assert run(ctl.handle_photo(photo, context)) is True
     assert context.user_data["nutrition_pending_photo"] == "file-1"
-    assert "передано OpenAI" in photo.message.outbound[-1][0]
+    consent_text = photo.message.outbound[-1][0]
+    assert "передано искусственному интеллекту" in consent_text
+    assert "Передавать фото ИИ?" in consent_text
+    assert "OpenAI" not in consent_text
     assert not store.has_photo_consent(telegram_id=CLIENT_ID, version=PHOTO_CONSENT_VERSION)
 
     store.set_photo_consent(telegram_id=CLIENT_ID, version=PHOTO_CONSENT_VERSION)
