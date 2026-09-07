@@ -12,6 +12,10 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from src.bot import NatriumBot
 from src.openai_bot import OpenAIBot
+from src.nutrition_ai import NutritionAI
+from src.nutrition_bot import NutritionBotController, parse_trainer_ids
+from src.nutrition_dashboard import create_dashboard_from_env
+from src.nutrition_store import NutritionStore
 from src.config import TELEGRAM_BOT_TOKEN
 
 # Настройка логирования
@@ -403,11 +407,52 @@ class TelegramSMMBot:
             logger.warning(f"⚠️ OpenAI не доступен: {e}")
             self.openai_bot = None
         
-        self.application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        self.nutrition_store = None
+        self.nutrition = None
+        self.nutrition_dashboard = None
+        self.nutrition_error = None
+        try:
+            nutrition_db_path = os.getenv(
+                "NUTRITION_DB_PATH", "data/nutrition/nutrition.sqlite3"
+            )
+            self.nutrition_store = NutritionStore(nutrition_db_path)
+            trainer_ids = parse_trainer_ids()
+            dashboard_enabled = os.getenv("NUTRITION_DASHBOARD_ENABLED", "0") == "1"
+            dashboard_origin = os.getenv("NUTRITION_DASHBOARD_ORIGIN", "")
+            dashboard_available = (
+                dashboard_enabled
+                and dashboard_origin.startswith("https://")
+                and bool(trainer_ids)
+            )
+            self.nutrition = NutritionBotController(
+                store=self.nutrition_store,
+                ai=NutritionAI(),
+                trainer_ids=trainer_ids,
+                dashboard_origin=dashboard_origin if dashboard_available else None,
+            )
+            if dashboard_available:
+                self.nutrition_dashboard = create_dashboard_from_env(
+                    self.nutrition_store,
+                    bot_token=TELEGRAM_BOT_TOKEN,
+                )
+        except Exception as exc:
+            self.nutrition_error = exc
+            if self.nutrition is not None:
+                self.nutrition.dashboard_origin = ""
+            logger.exception("Nutrition diary initialization failed; SMM functions remain available")
+
+        self.application = (
+            Application.builder()
+            .token(TELEGRAM_BOT_TOKEN)
+            .post_init(self._post_init)
+            .post_shutdown(self._post_shutdown)
+            .build()
+        )
         
         # Постоянная клавиатура с кнопками
         self.main_keyboard = ReplyKeyboardMarkup(
             [
+                [KeyboardButton("🥗 Дневник питания")],
                 [KeyboardButton("🔄 Начать заново")],
                 [KeyboardButton("⚙️ Настройки")]
             ],
@@ -417,9 +462,56 @@ class TelegramSMMBot:
         
         # Регистрация обработчиков
         self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("nutrition", self.nutrition_command))
+        self.application.add_handler(CommandHandler("today", self.nutrition_today_command))
+        self.application.add_handler(CommandHandler("week", self.nutrition_week_command))
         self.application.add_handler(CommandHandler("update_prompt", self.update_prompt_command))
         self.application.add_handler(CallbackQueryHandler(self.button_handler))
+        self.application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_handler))
+
+    async def _post_init(self, application: Application) -> None:
+        if self.nutrition_dashboard is None:
+            return
+        try:
+            self.nutrition_dashboard.start()
+            logger.info("Nutrition dashboard listener started")
+        except Exception:
+            logger.exception("Nutrition dashboard failed to start; bot continues without web panel")
+            if self.nutrition is not None:
+                self.nutrition.dashboard_origin = ""
+            self.nutrition_dashboard = None
+
+    async def _post_shutdown(self, application: Application) -> None:
+        if self.nutrition_dashboard is not None:
+            try:
+                self.nutrition_dashboard.stop()
+                logger.info("Nutrition dashboard listener stopped")
+            except Exception:
+                logger.exception("Nutrition dashboard failed to stop cleanly")
+
+    async def _nutrition_unavailable(self, update: Update) -> None:
+        await update.effective_message.reply_text(
+            "⚠️ Дневник питания временно недоступен. Генератор SMM-постов продолжает работать."
+        )
+
+    async def nutrition_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if self.nutrition is None:
+            await self._nutrition_unavailable(update)
+            return
+        await self.nutrition.start(update, context)
+
+    async def nutrition_today_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if self.nutrition is None:
+            await self._nutrition_unavailable(update)
+            return
+        await self.nutrition.show_today(update, context)
+
+    async def nutrition_week_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if self.nutrition is None:
+            await self._nutrition_unavailable(update)
+            return
+        await self.nutrition.show_week(update, context)
 
     async def update_prompt_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обновляет системный промпт агента в Yandex Cloud (только для администраторов)"""
@@ -465,6 +557,9 @@ class TelegramSMMBot:
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
+        if context.args and context.args[0].lower() == "nutrition":
+            await self.nutrition_command(update, context)
+            return
         user = update.effective_user
         
         # Устанавливаем оптимальную технику cov+cok
@@ -510,6 +605,13 @@ class TelegramSMMBot:
         await query.answer()
         
         data = query.data
+
+        if data.startswith("nutrition:"):
+            if self.nutrition is None:
+                await self._nutrition_unavailable(update)
+            else:
+                await self.nutrition.handle_callback(update, context)
+            return
         
         # Выбор темы по номеру
         if data.startswith("theme_"):
@@ -998,7 +1100,15 @@ class TelegramSMMBot:
         if text == "⚙️ Настройки":
             await self.show_settings_menu_message(update, context)
             return
-        
+
+        if text == "🥗 Дневник питания":
+            await self.nutrition_command(update, context)
+            return
+
+        if self.nutrition is not None and self.nutrition.is_active(context):
+            if await self.nutrition.handle_text(update, context):
+                return
+
         # Проверяем, выбрана ли техника
         if 'technique' not in context.user_data:
             await update.message.reply_text(
@@ -1006,7 +1116,7 @@ class TelegramSMMBot:
                 reply_markup=self.main_keyboard
             )
             return
-        
+
         # Проверяем, ждём ли мы пользовательскую тему
         if context.user_data.get('waiting_custom_theme'):
             theme_name = text
@@ -1032,6 +1142,11 @@ class TelegramSMMBot:
                 "Если хотите написать свою тему, нажмите кнопку '✏️ Написать свою тему'",
                 reply_markup=self.main_keyboard
             )
+
+    async def photo_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Передает фото только активному приватному nutrition flow."""
+        if self.nutrition is not None:
+            await self.nutrition.handle_photo(update, context)
 
     async def show_settings_menu(self, query, context: ContextTypes.DEFAULT_TYPE):
         """Показывает меню настроек (callback version)"""

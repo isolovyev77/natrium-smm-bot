@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Дневник питания Natrium</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style nonce="__CSP_NONCE__">
+    :root {
+      --ink: #17221d;
+      --muted: #68746e;
+      --paper: #f5f7f3;
+      --card: #ffffff;
+      --line: #dfe6df;
+      --brand: #1f7a50;
+      --brand-dark: #15583a;
+      --soft: #eaf4ee;
+      --danger: #a33a35;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); }
+    button, input, select, textarea { font: inherit; }
+    button, select, input, textarea { min-height: 44px; }
+    button { border: 0; border-radius: 12px; padding: 10px 15px; background: var(--brand); color: white; cursor: pointer; }
+    button:hover { background: var(--brand-dark); }
+    button.secondary { background: var(--soft); color: var(--brand-dark); }
+    button.ghost { background: transparent; color: var(--brand-dark); border: 1px solid var(--line); }
+    button:disabled { opacity: .55; cursor: wait; }
+    input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; background: white; color: var(--ink); }
+    textarea { min-height: 82px; resize: vertical; }
+    label { display: grid; gap: 5px; color: var(--muted); font-size: 13px; }
+    .shell { width: min(1040px, 100%); margin: 0 auto; padding: 20px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: clamp(24px, 5vw, 36px); letter-spacing: -.03em; }
+    h2, h3 { margin: 0; }
+    .eyebrow { margin: 0 0 4px; color: var(--brand); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: 0 7px 25px rgba(38, 64, 50, .05); }
+    .toolbar { display: grid; grid-template-columns: minmax(200px, 1fr) auto auto; gap: 10px; align-items: end; margin-bottom: 14px; }
+    .tabs { display: flex; gap: 8px; }
+    .tabs button[aria-pressed="true"] { background: var(--brand-dark); }
+    .summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+    .metric { padding: 13px; background: var(--soft); border-radius: 13px; }
+    .metric span { display: block; color: var(--muted); font-size: 12px; }
+    .metric strong { display: block; margin-top: 4px; font-size: 19px; }
+    .split { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr); gap: 14px; }
+    .stack { display: grid; gap: 10px; }
+    .meal { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+    .meal:last-child { border-bottom: 0; }
+    .meal p { margin: 4px 0 0; color: var(--muted); }
+    .audit { font-size: 12px; color: var(--muted); }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+    .status { min-height: 24px; margin: 0 0 10px; color: var(--muted); }
+    .status.error { color: var(--danger); }
+    .empty { padding: 24px 8px; color: var(--muted); text-align: center; }
+    .week-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .week-table th, .week-table td { padding: 10px 7px; text-align: right; border-bottom: 1px solid var(--line); }
+    .week-table th:first-child, .week-table td:first-child { text-align: left; }
+    .hidden { display: none !important; }
+    dialog { width: min(560px, calc(100% - 24px)); border: 1px solid var(--line); border-radius: 16px; padding: 18px; color: var(--ink); }
+    dialog::backdrop { background: rgba(18, 35, 27, .38); }
+    @media (max-width: 760px) {
+      .shell { padding: 14px; }
+      header, .split { display: grid; grid-template-columns: 1fr; }
+      .toolbar { grid-template-columns: 1fr; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .summary .metric:first-child { grid-column: 1 / -1; }
+      .form-grid { grid-template-columns: 1fr; }
+      .week-wrap { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <p class="eyebrow">Natrium</p>
+        <h1>Дневник питания</h1>
+      </div>
+      <button id="refresh" class="ghost" type="button">Обновить</button>
+    </header>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <section class="card toolbar" aria-label="Фильтры">
+      <label>Клиент
+        <select id="client"><option value="">Выберите клиента</option></select>
+      </label>
+      <label>Дата
+        <input id="date" type="date">
+      </label>
+      <div class="tabs" role="group" aria-label="Период">
+        <button id="day-tab" type="button" aria-pressed="true">День</button>
+        <button id="week-tab" type="button" class="secondary" aria-pressed="false">Неделя</button>
+      </div>
+    </section>
+
+    <section id="content" class="hidden">
+      <div id="summary" class="summary" aria-label="Итоги"></div>
+      <div id="day-view" class="split">
+        <section class="card">
+          <h2>Приёмы пищи</h2>
+          <p class="status">КБЖУ по фото являются приблизительной оценкой после подтверждения человеком.</p>
+          <div id="meals" class="stack"></div>
+        </section>
+        <section class="card">
+          <h2>Дневные нормы</h2>
+          <p class="status">Нормы вводит тренер. Панель не рассчитывает их автоматически.</p>
+          <form id="norms-form">
+            <div class="form-grid">
+              <label>Ккал<input name="calories" type="number" min="0" step="1"></label>
+              <label>Белки, г<input name="protein_g" type="number" min="0" step="0.1"></label>
+              <label>Жиры, г<input name="fat_g" type="number" min="0" step="0.1"></label>
+              <label>Углеводы, г<input name="carbs_g" type="number" min="0" step="0.1"></label>
+              <label>Вода, мл<input name="water_ml" type="number" min="0" step="1"></label>
+              <label>Действуют с<input name="effective_from" type="date" required></label>
+            </div>
+            <div class="form-actions"><button type="submit">Сохранить нормы</button></div>
+          </form>
+        </section>
+      </div>
+      <section id="week-view" class="card hidden">
+        <h2>Неделя</h2>
+        <div class="week-wrap"><table class="week-table">
+          <thead><tr><th>Дата</th><th>Ккал</th><th>Б</th><th>Ж</th><th>У</th><th>Вода</th></tr></thead>
+          <tbody id="week-days"></tbody>
+        </table></div>
+      </section>
+    </section>
+
+    <dialog id="meal-dialog">
+      <form id="meal-form">
+        <h2>Изменить приём</h2>
+        <input name="meal_id" type="hidden">
+        <label>Тип<input name="meal_type" maxlength="100"></label>
+        <label>Заметка<textarea name="note" maxlength="2000"></textarea></label>
+        <h3>Позиции</h3>
+        <div id="meal-items" class="stack"></div>
+        <label>Комментарий тренера<textarea name="comment" maxlength="2000"></textarea></label>
+        <div class="form-actions">
+          <button id="cancel-meal" class="ghost" type="button">Отмена</button>
+          <button type="submit">Сохранить</button>
+        </div>
+      </form>
+    </dialog>
+  </main>
+
+  <script nonce="__CSP_NONCE__">
+    (() => {
+      "use strict";
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if (tg) { tg.ready(); tg.expand(); }
+      const initData = tg ? tg.initData : "";
+      const state = { clientId: "", mode: "day", meals: [] };
+      const q = (id) => document.getElementById(id);
+      const status = q("status");
+      q("date").value = new Date().toISOString().slice(0, 10);
+
+      function setStatus(message, error = false) {
+        status.textContent = message || "";
+        status.classList.toggle("error", error);
+      }
+      function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+      function node(tag, text, className) {
+        const item = document.createElement(tag);
+        if (text !== undefined && text !== null) item.textContent = String(text);
+        if (className) item.className = className;
+        return item;
+      }
+      function number(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed.toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0";
+      }
+      function value(source, ...keys) {
+        for (const key of keys) if (source && source[key] !== undefined && source[key] !== null) return source[key];
+        return 0;
+      }
+      async function api(path, options = {}) {
+        if (!initData) throw new Error("Откройте кабинет тренера из Telegram.");
+        const response = await fetch(path, {
+          ...options,
+          headers: { "X-Telegram-Init-Data": initData, ...(options.body ? { "Content-Type": "application/json" } : {}) }
+        });
+        const data = await response.json().catch(() => ({ error: "Некорректный ответ сервера" }));
+        if (!response.ok) {
+          const messages = {
+            400: "Проверьте дату, порцию и значения КБЖУ.",
+            401: "Откройте кабинет заново из бота.",
+            403: "Нет доступа к этому клиенту.",
+            404: "Данные не найдены или клиент больше не привязан.",
+            500: "Не удалось сохранить данные. Попробуйте позже."
+          };
+          throw new Error(messages[response.status] || data.error || "Ошибка запроса");
+        }
+        return data;
+      }
+      function metric(label, current, target, unit) {
+        const box = node("div", null, "metric");
+        box.append(node("span", label));
+        box.append(node("strong", `${number(current)}${target ? ` / ${number(target)}` : ""} ${unit}`));
+        return box;
+      }
+      function renderSummary(totals = {}, norms = {}, water = 0) {
+        const box = q("summary"); clear(box);
+        box.append(
+          metric("Калории", value(totals, "calories", "total_calories"), value(norms, "calories"), "ккал"),
+          metric("Белки", value(totals, "protein_g", "protein", "total_protein"), value(norms, "protein_g"), "г"),
+          metric("Жиры", value(totals, "fat_g", "fat", "total_fat"), value(norms, "fat_g"), "г"),
+          metric("Углеводы", value(totals, "carbs_g", "carbs", "total_carbs"), value(norms, "carbs_g"), "г"),
+          metric("Вода", water, value(norms, "water_ml"), "мл")
+        );
+      }
+      function putFormValues(form, data, names) {
+        names.forEach((name) => { form.elements[name].value = data && data[name] !== undefined ? data[name] : ""; });
+      }
+      function auditText(meal) {
+        const who = value(meal, "updated_by_name", "updated_by", "edited_by");
+        const when = value(meal, "updated_at", "edited_at");
+        const manuallyEdited = Array.isArray(meal.items) && meal.items.some((item) => Boolean(item.manually_edited));
+        return who || manuallyEdited ? `Изменено: ${who || "тренер"}${when ? `, ${when}` : ""}` : "";
+      }
+      function renderMeals(meals) {
+        state.meals = Array.isArray(meals) ? meals : [];
+        const list = q("meals"); clear(list);
+        if (!state.meals.length) { list.append(node("p", "Нет записей за этот день", "empty")); return; }
+        state.meals.forEach((meal) => {
+          const row = node("article", null, "meal");
+          const copy = node("div");
+          copy.append(node("h3", value(meal, "meal_type", "type") || "Приём пищи"));
+          const totals = (meal.items || []).reduce((sum, item) => {
+            sum.calories += Number(item.calories || 0); sum.protein_g += Number(item.protein_g || 0);
+            sum.fat_g += Number(item.fat_g || 0); sum.carbs_g += Number(item.carbs_g || 0); return sum;
+          }, { calories: 0, protein_g: 0, fat_g: 0, carbs_g: 0 });
+          copy.append(node("p", `${number(totals.calories)} ккал · Б ${number(totals.protein_g)} · Ж ${number(totals.fat_g)} · У ${number(totals.carbs_g)}`));
+          const names = Array.isArray(meal.items) ? meal.items.map((item) => item.name).filter(Boolean).join(", ") : "";
+          if (names) copy.append(node("p", names));
+          const audit = auditText(meal); if (audit) copy.append(node("p", audit, "audit"));
+          (meal.comments || []).forEach((comment) => {
+            const line = `Комментарий: ${comment.text}${comment.created_at ? `, ${comment.created_at}` : ""}`;
+            copy.append(node("p", line, "audit"));
+          });
+          const edit = node("button", "Изменить", "secondary"); edit.type = "button";
+          edit.addEventListener("click", () => openMeal(meal));
+          row.append(copy, edit); list.append(row);
+        });
+      }
+      function renderNorms(norms) {
+        putFormValues(q("norms-form"), norms || {}, ["calories", "protein_g", "fat_g", "carbs_g", "water_ml"]);
+        q("norms-form").elements.effective_from.value = q("date").value;
+      }
+      function renderWeek(data) {
+        renderSummary(data.averages || {}, {}, value(data.averages || {}, "water_ml"));
+        const body = q("week-days"); clear(body);
+        const days = Array.isArray(data.days) ? data.days : [];
+        if (!days.length) {
+          const row = document.createElement("tr"), cell = node("td", "Нет записей за неделю");
+          cell.colSpan = 6; row.append(cell); body.append(row); return;
+        }
+        days.forEach((day) => {
+          const totals = day.totals || day;
+          const row = document.createElement("tr");
+          [value(day, "date", "local_date"), value(totals, "calories", "total_calories"), value(totals, "protein_g", "total_protein"), value(totals, "fat_g", "total_fat"), value(totals, "carbs_g", "total_carbs"), value(day, "water_ml")].forEach((item, index) => row.append(node("td", index ? number(item) : item)));
+          body.append(row);
+        });
+      }
+      function monday(raw) {
+        const day = new Date(`${raw}T12:00:00`), offset = (day.getDay() + 6) % 7;
+        day.setDate(day.getDate() - offset); return day.toISOString().slice(0, 10);
+      }
+      async function loadClients() {
+        setStatus("Загружаем клиентов...");
+        const data = await api("/api/clients");
+        const select = q("client"), current = select.value; clear(select);
+        const placeholder = node("option", "Выберите клиента"); placeholder.value = ""; select.append(placeholder);
+        (data.clients || []).forEach((client) => {
+          const option = node("option", client.display_name || client.name || `Клиент ${client.id}`);
+          option.value = String(client.id); select.append(option);
+        });
+        if (current && [...select.options].some((option) => option.value === current)) select.value = current;
+        setStatus((data.clients || []).length ? "" : "Нет привязанных клиентов");
+      }
+      async function loadView() {
+        state.clientId = q("client").value;
+        if (!state.clientId) { q("content").classList.add("hidden"); return; }
+        setStatus("Загружаем данные...");
+        if (state.mode === "day") {
+          const data = await api(`/api/clients/${encodeURIComponent(state.clientId)}/day?date=${encodeURIComponent(q("date").value)}`);
+          renderSummary(data.totals || {}, data.norms || {}, value(data, "water_ml"));
+          renderMeals(data.meals); renderNorms(data.norms);
+        } else {
+          const data = await api(`/api/clients/${encodeURIComponent(state.clientId)}/week?start=${encodeURIComponent(monday(q("date").value))}`);
+          renderWeek(data);
+        }
+        q("content").classList.remove("hidden"); setStatus("");
+      }
+      function setMode(mode) {
+        state.mode = mode;
+        q("day-view").classList.toggle("hidden", mode !== "day");
+        q("week-view").classList.toggle("hidden", mode !== "week");
+        q("day-tab").setAttribute("aria-pressed", String(mode === "day"));
+        q("week-tab").setAttribute("aria-pressed", String(mode === "week"));
+        loadView().catch((error) => setStatus(error.message, true));
+      }
+      function openMeal(meal) {
+        const form = q("meal-form");
+        putFormValues(form, meal, ["meal_id", "meal_type", "note"]);
+        form.elements.meal_id.value = meal.id;
+        form.elements.comment.value = "";
+        const itemBox = q("meal-items"); clear(itemBox);
+        (meal.items || []).forEach((item) => itemBox.append(itemEditor(item)));
+        q("meal-dialog").showModal();
+      }
+      function itemEditor(item) {
+        const box = node("section", null, "card"); box.dataset.itemRow = "1";
+        const fields = [
+          ["Название", "name", "text", "1"], ["Масса, г", "weight_g", "number", "0.1"],
+          ["Порция словами", "portion_text", "text", "1"], ["Ккал", "calories", "number", "0.1"],
+          ["Белки, г", "protein_g", "number", "0.1"], ["Жиры, г", "fat_g", "number", "0.1"],
+          ["Углеводы, г", "carbs_g", "number", "0.1"]
+        ];
+        const grid = node("div", null, "form-grid");
+        fields.forEach(([labelText, name, type, step]) => {
+          const label = node("label", labelText), input = document.createElement("input");
+          input.name = name; input.type = type; if (type === "number") { input.min = "0"; input.step = step; }
+          input.value = item[name] !== undefined && item[name] !== null ? item[name] : "";
+          label.append(input); grid.append(label);
+        });
+        const approxLabel = node("label", "Приблизительная оценка"), approx = document.createElement("input");
+        approx.type = "checkbox"; approx.name = "approximate"; approx.checked = item.approximate !== false;
+        approxLabel.append(approx); grid.append(approxLabel); box.append(grid); return box;
+      }
+      function numericPayload(form, names) {
+        const result = {};
+        names.forEach((name) => { if (form.elements[name].value !== "") result[name] = Number(form.elements[name].value); });
+        return result;
+      }
+      function itemPayload(row) {
+        const read = (name) => row.querySelector(`[name="${name}"]`).value;
+        const result = {
+          name: read("name"), portion_text: read("portion_text"),
+          calories: Number(read("calories") || 0), protein_g: Number(read("protein_g") || 0),
+          fat_g: Number(read("fat_g") || 0), carbs_g: Number(read("carbs_g") || 0),
+          approximate: row.querySelector('[name="approximate"]').checked
+        };
+        const weight = read("weight_g"); result.weight_g = weight === "" ? null : Number(weight); return result;
+      }
+
+      q("client").addEventListener("change", () => loadView().catch((error) => setStatus(error.message, true)));
+      q("date").addEventListener("change", () => loadView().catch((error) => setStatus(error.message, true)));
+      q("day-tab").addEventListener("click", () => setMode("day"));
+      q("week-tab").addEventListener("click", () => setMode("week"));
+      q("refresh").addEventListener("click", () => loadClients().then(loadView).catch((error) => setStatus(error.message, true)));
+      q("cancel-meal").addEventListener("click", () => q("meal-dialog").close());
+      q("norms-form").addEventListener("submit", async (event) => {
+        event.preventDefault(); const form = event.currentTarget;
+        const payload = numericPayload(form, ["calories", "protein_g", "fat_g", "carbs_g", "water_ml"]);
+        payload.effective_from = form.elements.effective_from.value;
+        try { await api(`/api/clients/${encodeURIComponent(state.clientId)}/norms`, { method: "POST", body: JSON.stringify(payload) }); await loadView(); setStatus("Нормы сохранены"); }
+        catch (error) { setStatus(error.message, true); }
+      });
+      q("meal-form").addEventListener("submit", async (event) => {
+        event.preventDefault(); const form = event.currentTarget, mealId = form.elements.meal_id.value;
+        const payload = { meal_type: form.elements.meal_type.value, note: form.elements.note.value };
+        payload.items = [...q("meal-items").querySelectorAll("[data-item-row]")].map(itemPayload);
+        try {
+          await api(`/api/meals/${encodeURIComponent(mealId)}`, { method: "PATCH", body: JSON.stringify(payload) });
+          const comment = form.elements.comment.value.trim();
+          if (comment) await api(`/api/meals/${encodeURIComponent(mealId)}/comments`, { method: "POST", body: JSON.stringify({ text: comment }) });
+          q("meal-dialog").close(); await loadView(); setStatus("Приём обновлён");
+        } catch (error) { setStatus(error.message, true); }
+      });
+
+      loadClients().catch((error) => setStatus(error.message, true));
+    })();
+  </script>
+</body>
+</html>
