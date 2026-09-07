@@ -1,0 +1,71 @@
+{
+  "calculation": "per_100g * grams / 100",
+  "catalog_records": 8105,
+  "datasets": [
+    {
+      "complete_foods": 312,
+      "download_url": "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_foundation_food_csv_2026-04-30.zip",
+      "energy_preference": [
+        "2048",
+        "2047",
+        "1008"
+      ],
+      "incomplete_skipped": 83,
+      "key": "foundation",
+      "selected_foods": 395,
+      "sha256": "70457ee9d9342f43bda2010318c85f04210c689fdeb9cd2da4c513b0e8dbc655",
+      "source": "USDA FoodData Central Foundation Foods",
+      "version": "2026-04-30"
+    },
+    {
+      "complete_foods": 7793,
+      "download_url": "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_sr_legacy_food_csv_2018-04.zip",
+      "energy_preference": [
+        "1008"
+      ],
+      "incomplete_skipped": 0,
+      "key": "sr_legacy",
+      "selected_foods": 7793,
+      "sha256": "b80817294b8850530aaedf2e515c02593b1824f763a0ff356e5c2081643e6fd0",
+      "source": "USDA FoodData Central SR Legacy",
+      "version": "2018-04"
+    }
+  ],
+  "nutrients_per_100g": {
+    "carbs_g": {
+      "nutrient_id": "1005",
+      "unit": "G"
+    },
+    "fat_g": {
+      "nutrient_id": "1004",
+      "unit": "G"
+    },
+    "kcal": {
+      "foundation_preference": [
+        {
+          "name": "Energy (Atwater Specific Factors)",
+          "nutrient_id": "2048"
+        },
+        {
+          "name": "Energy (Atwater General Factors)",
+          "nutrient_id": "2047"
+        },
+        {
+          "name": "Energy",
+          "nutrient_id": "1008"
+        }
+      ],
+      "sr_legacy": {
+        "name": "Energy",
+        "nutrient_id": "1008"
+      },
+      "unit": "KCAL"
+    },
+    "protein_g": {
+      "nutrient_id": "1003",
+      "unit": "G"
+    }
+  },
+  "schema_version": 1,
+  "source_page": "https://fdc.nal.usda.gov/download-datasets/"
+}

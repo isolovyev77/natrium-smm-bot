@@ -38,12 +38,13 @@ import secrets
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_TIMEZONE = "Europe/Moscow"
 
 
@@ -143,7 +144,12 @@ class NutritionStore:
             Path(f"{self.db_path}-shm"),
         ):
             if candidate.exists():
-                candidate.chmod(0o600)
+                try:
+                    candidate.chmod(0o600)
+                except FileNotFoundError:
+                    # WAL/SHM может исчезнуть между exists() и chmod() при закрытии
+                    # последнего параллельного соединения.
+                    pass
 
     def _migrate(self) -> None:
         with self._connection() as db:
@@ -173,9 +179,11 @@ class NutritionStore:
                 CREATE TABLE IF NOT EXISTS trainer_invites (
                     code TEXT PRIMARY KEY,
                     trainer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    expires_at TEXT NOT NULL,
-                    max_uses INTEGER NOT NULL DEFAULT 1,
+                    expires_at TEXT,
+                    max_uses INTEGER,
                     uses INTEGER NOT NULL DEFAULT 0,
+                    invite_kind TEXT NOT NULL DEFAULT 'one_time',
+                    revoked_at TEXT,
                     created_at TEXT NOT NULL
                 );
 
@@ -235,6 +243,17 @@ class NutritionStore:
                     carbs_g REAL NOT NULL,
                     approximate INTEGER NOT NULL DEFAULT 1,
                     manually_edited INTEGER NOT NULL DEFAULT 0,
+                    calculation_method TEXT NOT NULL DEFAULT 'legacy',
+                    reference_fdc_id TEXT,
+                    reference_source TEXT,
+                    reference_version TEXT,
+                    reference_url TEXT,
+                    reference_description TEXT,
+                    reference_preparation TEXT,
+                    reference_kcal_per_100g REAL,
+                    reference_protein_per_100g REAL,
+                    reference_fat_per_100g REAL,
+                    reference_carbs_per_100g REAL,
                     created_at TEXT NOT NULL
                 );
 
@@ -275,6 +294,66 @@ class NutritionStore:
             row = db.execute("SELECT version FROM schema_meta LIMIT 1").fetchone()
             if row is None:
                 db.execute("INSERT INTO schema_meta(version) VALUES (?)", (SCHEMA_VERSION,))
+            elif row["version"] == 1:
+                db.execute("BEGIN IMMEDIATE")
+                invite_columns = {
+                    column["name"] for column in db.execute("PRAGMA table_info(trainer_invites)")
+                }
+                if "invite_kind" not in invite_columns:
+                    db.execute("ALTER TABLE trainer_invites RENAME TO trainer_invites_v1")
+                    db.execute(
+                        """
+                        CREATE TABLE trainer_invites (
+                            code TEXT PRIMARY KEY,
+                            trainer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                            expires_at TEXT,
+                            max_uses INTEGER,
+                            uses INTEGER NOT NULL DEFAULT 0,
+                            invite_kind TEXT NOT NULL DEFAULT 'one_time',
+                            revoked_at TEXT,
+                            created_at TEXT NOT NULL
+                        )
+                        """
+                    )
+                    db.execute(
+                        """
+                        INSERT INTO trainer_invites(
+                            code, trainer_user_id, expires_at, max_uses, uses,
+                            invite_kind, revoked_at, created_at
+                        )
+                        SELECT code, trainer_user_id, expires_at, max_uses, uses,
+                               'one_time', NULL, created_at
+                        FROM trainer_invites_v1
+                        """
+                    )
+                    db.execute("DROP TABLE trainer_invites_v1")
+                existing = {
+                    column["name"] for column in db.execute("PRAGMA table_info(meal_items)")
+                }
+                additions = {
+                    "calculation_method": "TEXT NOT NULL DEFAULT 'legacy'",
+                    "reference_fdc_id": "TEXT",
+                    "reference_source": "TEXT",
+                    "reference_version": "TEXT",
+                    "reference_url": "TEXT",
+                    "reference_description": "TEXT",
+                    "reference_preparation": "TEXT",
+                    "reference_kcal_per_100g": "REAL",
+                    "reference_protein_per_100g": "REAL",
+                    "reference_fat_per_100g": "REAL",
+                    "reference_carbs_per_100g": "REAL",
+                }
+                for name, definition in additions.items():
+                    if name not in existing:
+                        db.execute(f"ALTER TABLE meal_items ADD COLUMN {name} {definition}")
+                db.execute(
+                    """
+                    UPDATE meal_items SET calculation_method = 'ai'
+                    WHERE approximate = 1 AND manually_edited = 0
+                      AND meal_id IN (SELECT id FROM meals WHERE source = 'photo')
+                    """
+                )
+                db.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))
             elif row["version"] != SCHEMA_VERSION:
                 raise RuntimeError(
                     f"Версия базы {row['version']} не поддерживается кодом {SCHEMA_VERSION}"
@@ -401,6 +480,37 @@ class NutritionStore:
                 continue
         raise RuntimeError("Не удалось создать уникальный код")
 
+    def get_or_create_trainer_code(self, *, trainer_telegram_id: int) -> dict[str, Any]:
+        trainer = self._require_user(trainer_telegram_id)
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute(
+                """
+                SELECT * FROM trainer_invites
+                WHERE trainer_user_id = ? AND invite_kind = 'reusable' AND revoked_at IS NULL
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (trainer["id"],),
+            ).fetchone()
+            if current is not None:
+                return dict(current)
+            return self._insert_reusable_code(db, trainer["id"])
+
+    def replace_trainer_code(self, *, trainer_telegram_id: int) -> dict[str, Any]:
+        trainer = self._require_user(trainer_telegram_id)
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                """
+                UPDATE trainer_invites SET revoked_at = ?
+                WHERE trainer_user_id = ? AND invite_kind = 'reusable' AND revoked_at IS NULL
+                """,
+                (_utc_now(), trainer["id"]),
+            )
+            result = self._insert_reusable_code(db, trainer["id"])
+            self._audit(db, trainer["id"], "replace_reusable_code", "user", trainer["id"], {})
+            return result
+
     def link_client_by_code(self, *, client_telegram_id: int, code: str) -> dict[str, Any]:
         client = self._require_user(client_telegram_id)
         normalized = code.strip().upper()
@@ -408,25 +518,52 @@ class NutritionStore:
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             invite = db.execute(
-                "SELECT * FROM trainer_invites WHERE code = ?", (normalized,)
+                "SELECT * FROM trainer_invites WHERE code = ? AND revoked_at IS NULL", (normalized,)
             ).fetchone()
             if invite is None:
                 raise ValueError("Код тренера не найден")
-            if datetime.fromisoformat(invite["expires_at"]) <= now:
-                raise ValueError("Срок действия кода тренера истек")
-            if invite["uses"] >= invite["max_uses"]:
-                raise ValueError("Код тренера уже использован")
             if invite["trainer_user_id"] == client["id"]:
                 raise ValueError("Тренер не может привязать себя как клиента")
-            reserved = db.execute(
+            existing_link = db.execute(
                 """
-                UPDATE trainer_invites SET uses = uses + 1
-                WHERE code = ? AND uses < max_uses AND expires_at > ?
+                SELECT 1 FROM trainer_clients
+                WHERE trainer_user_id = ? AND client_user_id = ? AND active = 1
                 """,
-                (normalized, now.isoformat(timespec="seconds")),
-            )
+                (invite["trainer_user_id"], client["id"]),
+            ).fetchone()
+            trainer = db.execute(
+                "SELECT * FROM users WHERE id = ?", (invite["trainer_user_id"],)
+            ).fetchone()
+            if existing_link is not None:
+                return {
+                    "client_id": client["id"],
+                    "trainer_id": trainer["id"],
+                    "trainer_display_name": trainer["display_name"],
+                }
+            if invite["invite_kind"] == "one_time":
+                if not invite["expires_at"] or datetime.fromisoformat(invite["expires_at"]) <= now:
+                    raise ValueError("Срок действия кода тренера истек")
+                if invite["max_uses"] is None or invite["uses"] >= invite["max_uses"]:
+                    raise ValueError("Код тренера уже использован")
+                reserved = db.execute(
+                    """
+                    UPDATE trainer_invites SET uses = uses + 1
+                    WHERE code = ? AND uses < max_uses AND expires_at > ? AND revoked_at IS NULL
+                    """,
+                    (normalized, now.isoformat(timespec="seconds")),
+                )
+            elif invite["invite_kind"] == "reusable":
+                reserved = db.execute(
+                    """
+                    UPDATE trainer_invites SET uses = uses + 1
+                    WHERE code = ? AND invite_kind = 'reusable' AND revoked_at IS NULL
+                    """,
+                    (normalized,),
+                )
+            else:
+                raise ValueError("Тип кода тренера не поддерживается")
             if reserved.rowcount != 1:
-                raise ValueError("Код тренера уже использован или просрочен")
+                raise ValueError("Код тренера уже недействителен")
             db.execute(
                 """
                 UPDATE trainer_clients SET active = 0
@@ -442,13 +579,32 @@ class NutritionStore:
                 """,
                 (invite["trainer_user_id"], client["id"], _utc_now()),
             )
-            trainer = db.execute("SELECT * FROM users WHERE id = ?", (invite["trainer_user_id"],)).fetchone()
             self._audit(db, client["id"], "link", "trainer_client", client["id"], {})
             return {
                 "client_id": client["id"],
                 "trainer_id": trainer["id"],
                 "trainer_display_name": trainer["display_name"],
             }
+
+    @staticmethod
+    def _insert_reusable_code(db: sqlite3.Connection, trainer_user_id: int) -> dict[str, Any]:
+        for _ in range(8):
+            code = secrets.token_urlsafe(12).replace("-", "").replace("_", "")[:16].upper()
+            try:
+                db.execute(
+                    """
+                    INSERT INTO trainer_invites(
+                        code, trainer_user_id, expires_at, max_uses, uses,
+                        invite_kind, revoked_at, created_at
+                    ) VALUES (?, ?, NULL, NULL, 0, 'reusable', NULL, ?)
+                    """,
+                    (code, trainer_user_id, _utc_now()),
+                )
+                row = db.execute("SELECT * FROM trainer_invites WHERE code = ?", (code,)).fetchone()
+                return dict(row)
+            except sqlite3.IntegrityError:
+                continue
+        raise RuntimeError("Не удалось создать уникальный код")
 
     def unlink_client(self, *, trainer_telegram_id: int, client_id: int) -> None:
         """Отключает доступ тренера к клиенту."""
@@ -532,6 +688,7 @@ class NutritionStore:
         if not prepared:
             raise ValueError("Нужен хотя бы один продукт или блюдо")
         with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
             meal = self._require_owned_meal(db, user["id"], meal_id)
             if meal["status"] != "draft":
                 raise ValueError("Изменять можно только черновик")
@@ -543,6 +700,78 @@ class NutritionStore:
             self._audit(
                 db, user["id"], "replace_items", "meal", meal_id,
                 {"before": before, "after": after},
+            )
+            return after
+
+    def get_owned_draft(self, *, client_telegram_id: int, meal_id: int) -> dict[str, Any]:
+        user = self._require_user(client_telegram_id)
+        with self._connection() as db:
+            meal = self._require_owned_meal(db, user["id"], meal_id)
+            if meal["status"] != "draft":
+                raise ValueError("Изменять можно только черновик")
+            return self._meal_by_id(db, meal_id)
+
+    def replace_draft_item_with_reference(
+        self,
+        *,
+        client_telegram_id: int,
+        meal_id: int,
+        item_id: int,
+        item: dict[str, Any],
+    ) -> dict[str, Any]:
+        user = self._require_user(client_telegram_id)
+        prepared = self._validate_items([item], require_portion=True)
+        if prepared[0]["calculation_method"] != "reference":
+            raise ValueError("Для замены нужна запись справочника")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            meal = self._require_owned_meal(db, user["id"], meal_id)
+            if meal["status"] != "draft":
+                raise ValueError("Изменять можно только черновик")
+            current = db.execute(
+                "SELECT id FROM meal_items WHERE id = ? AND meal_id = ?", (item_id, meal_id)
+            ).fetchone()
+            if current is None:
+                raise PermissionError("Продукт принадлежит другому приему или не найден")
+            self._update_item(db, item_id, prepared[0], manually_edited=False)
+            db.execute("UPDATE meals SET updated_at = ? WHERE id = ?", (_utc_now(), meal_id))
+            after = self._meal_by_id(db, meal_id)
+            self._audit(
+                db, user["id"], "replace_item_from_reference", "meal", meal_id,
+                {"item_id": item_id, "after": after},
+            )
+            return after
+
+    def update_reference_item_weight(
+        self,
+        *,
+        client_telegram_id: int,
+        meal_id: int,
+        item_id: int,
+        grams: float | str,
+    ) -> dict[str, Any]:
+        user = self._require_user(client_telegram_id)
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            meal = self._require_owned_meal(db, user["id"], meal_id)
+            if meal["status"] != "draft":
+                raise ValueError("Изменять можно только черновик")
+            row = db.execute(
+                "SELECT * FROM meal_items WHERE id = ? AND meal_id = ?", (item_id, meal_id)
+            ).fetchone()
+            if row is None:
+                raise PermissionError("Продукт принадлежит другому приему или не найден")
+            if row["calculation_method"] != "reference":
+                raise ValueError("Массу можно пересчитать только для позиции справочника")
+            updated = dict(row)
+            updated["weight_g"] = grams
+            prepared = self._validate_items([updated], require_portion=True)[0]
+            self._update_item(db, item_id, prepared, manually_edited=False)
+            db.execute("UPDATE meals SET updated_at = ? WHERE id = ?", (_utc_now(), meal_id))
+            after = self._meal_by_id(db, meal_id)
+            self._audit(
+                db, user["id"], "recalculate_reference_item", "meal", meal_id,
+                {"item_id": item_id, "grams": prepared["weight_g"]},
             )
             return after
 
@@ -680,6 +909,38 @@ class NutritionStore:
             client = self._require_trainer_access(db, trainer["id"], client_id)
             return self._week_summary(db, client, _parse_date(week_start))
 
+    def list_recent_client_meals(
+        self,
+        trainer_telegram_id: int,
+        client_id: int,
+        *,
+        limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        trainer = self._require_user(trainer_telegram_id)
+        limit = max(1, min(int(limit), 30))
+        with self._connection() as db:
+            self._require_trainer_access(db, trainer["id"], client_id)
+            rows = db.execute(
+                """
+                SELECT id FROM meals
+                WHERE client_user_id = ? AND status = 'confirmed'
+                ORDER BY eaten_at DESC, id DESC LIMIT ?
+                """,
+                (client_id, limit),
+            ).fetchall()
+            return [self._meal_by_id(db, row["id"]) for row in rows]
+
+    def get_client_meal(self, trainer_telegram_id: int, meal_id: int) -> dict[str, Any]:
+        trainer = self._require_user(trainer_telegram_id)
+        with self._connection() as db:
+            meal = db.execute("SELECT * FROM meals WHERE id = ?", (meal_id,)).fetchone()
+            if meal is None:
+                raise ValueError("Прием пищи не найден")
+            self._require_trainer_access(db, trainer["id"], meal["client_user_id"])
+            if meal["status"] != "confirmed":
+                raise ValueError("Прием пищи еще не подтвержден")
+            return self._meal_by_id(db, meal_id)
+
     def update_meal_as_trainer(
         self,
         trainer_telegram_id: int,
@@ -692,6 +953,7 @@ class NutritionStore:
         if unknown:
             raise ValueError(f"Неподдерживаемые поля: {', '.join(sorted(unknown))}")
         with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
             meal = db.execute("SELECT * FROM meals WHERE id = ?", (meal_id,)).fetchone()
             if meal is None:
                 raise ValueError("Прием пищи не найден")
@@ -743,6 +1005,7 @@ class NutritionStore:
         date_value = _parse_date(effective_from).isoformat()
         normalized = self._normalize_norms(norms)
         with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
             self._require_trainer_access(db, trainer["id"], client_id)
             before = db.execute(
                 "SELECT * FROM nutrition_norms WHERE client_user_id = ? AND effective_from = ?",
@@ -779,6 +1042,67 @@ class NutritionStore:
             )
             return dict(row)
 
+    def set_norms_bulk(
+        self,
+        trainer_telegram_id: int,
+        client_id: int,
+        rows: Iterable[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Атомарно добавляет или заменяет нормы на явно указанные даты."""
+        trainer = self._require_user(trainer_telegram_id)
+        prepared: list[tuple[str, dict[str, Any]]] = []
+        seen_dates: set[str] = set()
+        for raw in rows:
+            date_value = _parse_date(raw.get("effective_from", "")).isoformat()
+            if date_value in seen_dates:
+                raise ValueError(f"Дата {date_value} указана несколько раз")
+            seen_dates.add(date_value)
+            values = {key: value for key, value in raw.items() if key != "effective_from"}
+            prepared.append((date_value, self._normalize_norms(values)))
+        if not prepared:
+            raise ValueError("План норм не содержит строк")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._require_trainer_access(db, trainer["id"], client_id)
+            result = []
+            for date_value, normalized in sorted(prepared):
+                before = db.execute(
+                    "SELECT * FROM nutrition_norms WHERE client_user_id = ? AND effective_from = ?",
+                    (client_id, date_value),
+                ).fetchone()
+                db.execute(
+                    """
+                    INSERT INTO nutrition_norms(
+                        client_user_id, effective_from, calories, protein_g, fat_g,
+                        carbs_g, water_ml, set_by_user_id, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(client_user_id, effective_from) DO UPDATE SET
+                        calories = excluded.calories,
+                        protein_g = excluded.protein_g,
+                        fat_g = excluded.fat_g,
+                        carbs_g = excluded.carbs_g,
+                        water_ml = excluded.water_ml,
+                        set_by_user_id = excluded.set_by_user_id,
+                        created_at = excluded.created_at
+                    """,
+                    (
+                        client_id, date_value, normalized["calories"],
+                        normalized["protein_g"], normalized["fat_g"],
+                        normalized["carbs_g"], normalized["water_ml"],
+                        trainer["id"], _utc_now(),
+                    ),
+                )
+                row = db.execute(
+                    "SELECT * FROM nutrition_norms WHERE client_user_id = ? AND effective_from = ?",
+                    (client_id, date_value),
+                ).fetchone()
+                self._audit(
+                    db, trainer["id"], "set_norms", "user", client_id,
+                    {"before": dict(before) if before else None, "after": dict(row)},
+                )
+                result.append(dict(row))
+            return result
+
     def add_comment(
         self,
         trainer_telegram_id: int,
@@ -792,6 +1116,7 @@ class NutritionStore:
         if len(value) > 2000:
             raise ValueError("Комментарий слишком длинный")
         with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
             meal = db.execute("SELECT * FROM meals WHERE id = ?", (meal_id,)).fetchone()
             if meal is None:
                 raise ValueError("Прием пищи не найден")
@@ -890,19 +1215,75 @@ class NutritionStore:
                 raise ValueError("У каждого блюда должно быть название")
             weight = _number(raw.get("weight_g"), "Масса", allow_none=True, max_value=100000)
             portion_text = str(raw.get("portion_text", "")).strip()[:200]
-            approximate = bool(raw.get("approximate", weight is None))
+            method = str(raw.get("calculation_method", "manual")).strip().lower()
+            if method not in {"legacy", "manual", "ai", "reference"}:
+                raise ValueError("Неизвестный метод расчета КБЖУ")
+            approximate = bool(raw.get("approximate", method == "ai" or weight is None))
             if require_portion and not ((weight is not None and weight > 0) or portion_text):
                 raise ValueError(f"Укажите массу или описание порции для блюда: {name}")
+            reference = {
+                "reference_fdc_id": None,
+                "reference_source": None,
+                "reference_version": None,
+                "reference_url": None,
+                "reference_description": None,
+                "reference_preparation": None,
+                "reference_kcal_per_100g": None,
+                "reference_protein_per_100g": None,
+                "reference_fat_per_100g": None,
+                "reference_carbs_per_100g": None,
+            }
+            if method == "reference":
+                fdc_id = str(raw.get("reference_fdc_id", "")).strip()
+                if not fdc_id.isdigit():
+                    raise ValueError("У записи справочника отсутствует корректный FDC ID")
+                for key in ("reference_source", "reference_version", "reference_url"):
+                    value = str(raw.get(key, "")).strip()
+                    if not value:
+                        raise ValueError("У записи справочника неполные сведения об источнике")
+                    reference[key] = value[:1000]
+                reference["reference_fdc_id"] = fdc_id
+                reference["reference_description"] = str(
+                    raw.get("reference_description", "")
+                ).strip()[:1000]
+                reference["reference_preparation"] = str(
+                    raw.get("reference_preparation", "") or ""
+                ).strip()[:200] or None
+                if weight is None or weight <= 0:
+                    raise ValueError("Для расчета по справочнику укажите массу больше нуля")
+                per_keys = {
+                    "calories": "reference_kcal_per_100g",
+                    "protein_g": "reference_protein_per_100g",
+                    "fat_g": "reference_fat_per_100g",
+                    "carbs_g": "reference_carbs_per_100g",
+                }
+                totals = {}
+                grams_decimal = Decimal(str(weight))
+                for total_key, per_key in per_keys.items():
+                    per_value = _number(raw.get(per_key), per_key, max_value=100000)
+                    reference[per_key] = per_value
+                    totals[total_key] = float(
+                        (Decimal(str(per_value)) * grams_decimal / Decimal("100")).quantize(
+                            Decimal("0.01"), rounding=ROUND_HALF_UP
+                        )
+                    )
+                approximate = False
+            else:
+                totals = {
+                    "calories": _number(raw.get("calories", 0), "Калории", max_value=100000),
+                    "protein_g": _number(raw.get("protein_g", raw.get("protein", 0)), "Белки", max_value=10000),
+                    "fat_g": _number(raw.get("fat_g", raw.get("fat", 0)), "Жиры", max_value=10000),
+                    "carbs_g": _number(raw.get("carbs_g", raw.get("carbs", 0)), "Углеводы", max_value=10000),
+                }
             prepared.append(
                 {
                     "name": name,
                     "weight_g": weight,
                     "portion_text": portion_text,
-                    "calories": _number(raw.get("calories", 0), "Калории", max_value=100000),
-                    "protein_g": _number(raw.get("protein_g", raw.get("protein", 0)), "Белки", max_value=10000),
-                    "fat_g": _number(raw.get("fat_g", raw.get("fat", 0)), "Жиры", max_value=10000),
-                    "carbs_g": _number(raw.get("carbs_g", raw.get("carbs", 0)), "Углеводы", max_value=10000),
+                    **totals,
                     "approximate": approximate,
+                    "calculation_method": method,
+                    **reference,
                 }
             )
         return prepared
@@ -919,17 +1300,58 @@ class NutritionStore:
             """
             INSERT INTO meal_items(
                 meal_id, name, weight_g, portion_text, calories, protein_g,
-                fat_g, carbs_g, approximate, manually_edited, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                fat_g, carbs_g, approximate, manually_edited, calculation_method,
+                reference_fdc_id, reference_source, reference_version, reference_url,
+                reference_description, reference_preparation, reference_kcal_per_100g,
+                reference_protein_per_100g, reference_fat_per_100g,
+                reference_carbs_per_100g, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
                     meal_id, item["name"], item["weight_g"], item["portion_text"],
                     item["calories"], item["protein_g"], item["fat_g"], item["carbs_g"],
-                    int(item["approximate"]), int(manually_edited), now,
+                    int(item["approximate"]), int(manually_edited), item["calculation_method"],
+                    item["reference_fdc_id"], item["reference_source"], item["reference_version"],
+                    item["reference_url"], item["reference_description"],
+                    item["reference_preparation"], item["reference_kcal_per_100g"],
+                    item["reference_protein_per_100g"], item["reference_fat_per_100g"],
+                    item["reference_carbs_per_100g"], now,
                 )
                 for item in items
             ],
+        )
+
+    @staticmethod
+    def _update_item(
+        db: sqlite3.Connection,
+        item_id: int,
+        item: dict[str, Any],
+        *,
+        manually_edited: bool,
+    ) -> None:
+        db.execute(
+            """
+            UPDATE meal_items SET
+                name = ?, weight_g = ?, portion_text = ?, calories = ?, protein_g = ?,
+                fat_g = ?, carbs_g = ?, approximate = ?, manually_edited = ?,
+                calculation_method = ?, reference_fdc_id = ?, reference_source = ?,
+                reference_version = ?, reference_url = ?, reference_description = ?,
+                reference_preparation = ?, reference_kcal_per_100g = ?,
+                reference_protein_per_100g = ?, reference_fat_per_100g = ?,
+                reference_carbs_per_100g = ?
+            WHERE id = ?
+            """,
+            (
+                item["name"], item["weight_g"], item["portion_text"], item["calories"],
+                item["protein_g"], item["fat_g"], item["carbs_g"],
+                int(item["approximate"]), int(manually_edited), item["calculation_method"],
+                item["reference_fdc_id"], item["reference_source"], item["reference_version"],
+                item["reference_url"], item["reference_description"],
+                item["reference_preparation"], item["reference_kcal_per_100g"],
+                item["reference_protein_per_100g"], item["reference_fat_per_100g"],
+                item["reference_carbs_per_100g"], item_id,
+            ),
         )
 
     @staticmethod

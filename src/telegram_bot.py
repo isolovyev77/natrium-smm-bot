@@ -462,12 +462,14 @@ class TelegramSMMBot:
         
         # Регистрация обработчиков
         self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("nutrition", self.nutrition_command))
         self.application.add_handler(CommandHandler("today", self.nutrition_today_command))
         self.application.add_handler(CommandHandler("week", self.nutrition_week_command))
         self.application.add_handler(CommandHandler("update_prompt", self.update_prompt_command))
         self.application.add_handler(CallbackQueryHandler(self.button_handler))
         self.application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
+        self.application.add_handler(MessageHandler(filters.Document.ALL, self.document_handler))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_handler))
 
     async def _post_init(self, application: Application) -> None:
@@ -513,6 +515,17 @@ class TelegramSMMBot:
             return
         await self.nutrition.show_week(update, context)
 
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Прерывает незавершенный ввод и возвращает понятную навигацию."""
+        if self.nutrition is not None and self.nutrition.is_active(context):
+            await self.nutrition.start(update, context)
+            return
+        await update.effective_message.reply_text(
+            "Выберите действие кнопками ниже. Для дневника питания нажмите "
+            "«🥗 Дневник питания».",
+            reply_markup=self.main_keyboard,
+        )
+
     async def update_prompt_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обновляет системный промпт агента в Yandex Cloud (только для администраторов)"""
         user_id = update.effective_user.id
@@ -557,6 +570,8 @@ class TelegramSMMBot:
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
+        if self.nutrition is not None:
+            self.nutrition.reset(context)
         if context.args and context.args[0].lower() == "nutrition":
             await self.nutrition_command(update, context)
             return
@@ -1147,6 +1162,11 @@ class TelegramSMMBot:
         """Передает фото только активному приватному nutrition flow."""
         if self.nutrition is not None:
             await self.nutrition.handle_photo(update, context)
+
+    async def document_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Принимает XLSX только внутри ожидаемого шага дневника."""
+        if self.nutrition is not None:
+            await self.nutrition.handle_document(update, context)
 
     async def show_settings_menu(self, query, context: ContextTypes.DEFAULT_TYPE):
         """Показывает меню настроек (callback version)"""

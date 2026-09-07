@@ -3,6 +3,7 @@ import importlib.util
 import re
 import sys
 import types
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -59,14 +60,19 @@ TRAINER_ID = 2001
 
 
 class FakeMessage:
-    def __init__(self, text=None, photo=None, message_id=10):
+    def __init__(self, text=None, photo=None, document=None, message_id=10):
         self.text = text
         self.photo = photo or []
+        self.document = document
         self.message_id = message_id
         self.outbound = []
+        self.documents = []
 
     async def reply_text(self, text, **kwargs):
         self.outbound.append((text, kwargs))
+
+    async def reply_document(self, document, **kwargs):
+        self.documents.append((document, kwargs))
 
 
 class FakeQuery:
@@ -148,12 +154,13 @@ def make_update(
     chat_type="private",
     text=None,
     photo_file_id=None,
+    document=None,
     callback_data=None,
     callback_id="callback-1",
     message_id=10,
 ):
     photo = [] if photo_file_id is None else [SimpleNamespace(file_id=photo_file_id)]
-    message = FakeMessage(text=text, photo=photo, message_id=message_id)
+    message = FakeMessage(text=text, photo=photo, document=document, message_id=message_id)
     query = FakeQuery(callback_data, message, callback_id) if callback_data is not None else None
     user = SimpleNamespace(id=user_id, full_name=f"User {user_id}", first_name="User")
     chat = SimpleNamespace(type=chat_type)
@@ -168,7 +175,7 @@ def make_update(
 
 def make_context(*, state=None, bot=None):
     user_data = dict(state or {})
-    return SimpleNamespace(user_data=user_data, bot=bot or FakeBot())
+    return SimpleNamespace(user_data=user_data, bot=bot or FakeBot(), args=[])
 
 
 def run(awaitable):
@@ -385,11 +392,25 @@ def test_trainer_can_set_norms_for_linked_client_but_client_cannot(store):
         callback_data=f"nutrition:trainer_norms:{client['id']}",
     )
     assert run(ctl.handle_callback(open_form, trainer_context)) is True
-    submit = make_update(
-        user_id=TRAINER_ID,
-        text="2033-05-18; 2000; 120; 70; 240; 2200",
+    date_markup = open_form.callback_query.edits[-1][1]["reply_markup"]
+    other_date = next(
+        value for value in nutrition_callbacks(date_markup)
+        if value.startswith("nutrition:norms_date:") and value.endswith(":other")
     )
-    assert run(ctl.handle_text(submit, trainer_context)) is True
+    choose_date = make_update(
+        user_id=TRAINER_ID, callback_data=other_date
+    )
+    run(ctl.handle_callback(choose_date, trainer_context))
+    run(ctl.handle_text(make_update(user_id=TRAINER_ID, text="2033-05-18"), trainer_context))
+    for value in ("2000", "120", "70", "240", "2200"):
+        assert run(ctl.handle_text(make_update(user_id=TRAINER_ID, text=value), trainer_context)) is True
+    assert store.get_client_day(TRAINER_ID, client["id"], "2033-05-18")["norms"] is None
+    confirm_callback = (
+        f"nutrition:norms_confirm:{client['id']}:"
+        f"{trainer_context.user_data['nutrition_norms_nonce']}"
+    )
+    confirm = make_update(user_id=TRAINER_ID, callback_data=confirm_callback)
+    run(ctl.handle_callback(confirm, trainer_context))
     day = store.get_client_day(TRAINER_ID, client["id"], "2033-05-18")
     assert day["norms"]["calories"] == 2000
 
@@ -472,7 +493,10 @@ def load_root_with_fakes(monkeypatch, dashboard_factory, store_type=None):
     monkeypatch.setattr(
         telegram_ext,
         "filters",
-        SimpleNamespace(PHOTO=Filter(), TEXT=Filter(), COMMAND=Filter()),
+        SimpleNamespace(
+            PHOTO=Filter(), TEXT=Filter(), COMMAND=Filter(),
+            Document=SimpleNamespace(ALL=Filter()),
+        ),
         raising=False,
     )
 
@@ -513,7 +537,7 @@ def test_root_dashboard_flag_and_start_failure_never_expose_broken_web_button(mo
         for handler in bot.application.handlers
         if handler.args and isinstance(handler.args[0], str)
     }
-    assert {"nutrition", "today", "week"} <= registered_commands
+    assert {"help", "nutrition", "today", "week"} <= registered_commands
     assert dashboard_calls == []
     assert bot.nutrition_dashboard is None
     assert bot.nutrition.dashboard_origin == ""
@@ -556,3 +580,377 @@ def test_root_dashboard_flag_and_start_failure_never_expose_broken_web_button(mo
     bot.nutrition_dashboard = StopFailingDashboard()
     run(bot._post_shutdown(bot.application))
     assert bot.application is not None
+
+
+def _linked_confirmed_meal(store, ctl):
+    ctl._ensure_user(make_update(user_id=TRAINER_ID))
+    ctl._ensure_user(make_update(user_id=CLIENT_ID))
+    invite = store.create_trainer_invite(trainer_telegram_id=TRAINER_ID)
+    store.link_client_by_code(client_telegram_id=CLIENT_ID, code=invite["code"])
+    meal = store.create_meal_draft(
+        client_telegram_id=CLIENT_ID,
+        source="manual",
+        eaten_at="2026-09-08T08:30:00+03:00",
+        meal_type="завтрак",
+        items=[{
+            "name": "Омлет", "weight_g": 200, "portion_text": "",
+            "calories": 300, "protein_g": 20, "fat_g": 22, "carbs_g": 4,
+            "approximate": False,
+        }],
+    )
+    return store.confirm_meal(
+        client_telegram_id=CLIENT_ID, meal_id=meal["id"], idempotency_key="trainer-ux"
+    )
+
+
+def test_trainer_comment_flow_uses_named_meal_plain_text_and_navigation(store):
+    ctl = controller(store, trainer_ids={TRAINER_ID})
+    meal = _linked_confirmed_meal(store, ctl)
+    client = store.get_user_by_telegram_id(CLIENT_ID)
+    context = make_context(state={"nutrition_active": True})
+
+    choose_action = make_update(
+        user_id=TRAINER_ID, callback_data=f"nutrition:trainer_comment:{client['id']}"
+    )
+    run(ctl.handle_callback(choose_action, context))
+    picker = choose_action.callback_query.edits[-1][1]["reply_markup"]
+    meal_callback = next(value for value in nutrition_callbacks(picker) if value.startswith("nutrition:tcm:"))
+    assert "Омлет" in picker.inline_keyboard[0][0].text
+    assert "ID" not in choose_action.callback_query.edits[-1][0]
+
+    choose_meal = make_update(user_id=TRAINER_ID, callback_data=meal_callback)
+    run(ctl.handle_callback(choose_meal, context))
+    assert context.user_data["nutrition_state"] == "trainer_comment_text"
+    assert "обычным текстом" in choose_meal.callback_query.edits[-1][0]
+    callbacks = nutrition_callbacks(choose_meal.callback_query.edits[-1][1]["reply_markup"])
+    assert any(value.startswith("nutrition:trainer_comment:") for value in callbacks)
+
+    comment = make_update(user_id=TRAINER_ID, text="Ivan Solovyev; Молодец, хороший прием пищи")
+    run(ctl.handle_text(comment, context))
+    assert "Комментарий добавлен" in comment.message.outbound[-1][0]
+    assert {"nutrition_active", "nutrition_trainer_meal_id", "nutrition_trainer_client_id"} <= set(context.user_data)
+    stored = store.get_client_meal(TRAINER_ID, meal["id"])
+    assert stored["comments"][-1]["text"] == "Ivan Solovyev; Молодец, хороший прием пищи"
+
+    context.user_data["nutrition_state"] = "trainer_comment_text"
+    context.user_data["nutrition_pending_plan"] = [{"stale": True}]
+    run(ctl.start(make_update(user_id=TRAINER_ID), context))
+    assert context.user_data == {"nutrition_active": True}
+
+
+def test_stale_trainer_meal_callback_is_denied_after_unlink(store):
+    ctl = controller(store, trainer_ids={TRAINER_ID})
+    _linked_confirmed_meal(store, ctl)
+    client = store.get_user_by_telegram_id(CLIENT_ID)
+    context = make_context(state={"nutrition_active": True})
+    picker_update = make_update(
+        user_id=TRAINER_ID, callback_data=f"nutrition:trainer_comment:{client['id']}"
+    )
+    run(ctl.handle_callback(picker_update, context))
+    callback = next(
+        value for value in nutrition_callbacks(picker_update.callback_query.edits[-1][1]["reply_markup"])
+        if value.startswith("nutrition:tcm:")
+    )
+    store.unlink_client(trainer_telegram_id=TRAINER_ID, client_id=client["id"])
+    stale = make_update(user_id=TRAINER_ID, callback_data=callback)
+    run(ctl.handle_callback(stale, context))
+    assert "не привязан" in stale.callback_query.message.outbound[-1][0]
+
+
+def test_reference_flow_uses_stable_fdc_ids_and_builds_multiple_products(store):
+    ctl = controller(store)
+    assert ctl.reference is not None
+    ctl._ensure_user(make_update())
+    context = make_context(state={"nutrition_active": True})
+    run(ctl.handle_callback(make_update(callback_data="nutrition:meal_reference"), context))
+
+    first_search = make_update(text="banana raw")
+    run(ctl.handle_text(first_search, context))
+    first_markup = first_search.message.outbound[-1][1]["reply_markup"]
+    first_pick = next(value for value in nutrition_callbacks(first_markup) if value.startswith("nutrition:ref_pick:"))
+    assert first_pick.rsplit(":", 1)[1].isdigit()
+    grams_prompt = make_update(callback_data=first_pick)
+    run(ctl.handle_callback(grams_prompt, context))
+    grams_callbacks = nutrition_callbacks(grams_prompt.callback_query.edits[-1][1]["reply_markup"])
+    assert "nutrition:ref_back_candidates" in grams_callbacks
+    run(ctl.handle_text(make_update(text="120"), context))
+
+    more = make_update(callback_data="nutrition:ref_more")
+    run(ctl.handle_callback(more, context))
+    assert "nutrition:ref_review" in nutrition_callbacks(more.callback_query.edits[-1][1]["reply_markup"])
+    second_search = make_update(text="rice cooked")
+    run(ctl.handle_text(second_search, context))
+    second_pick = next(
+        value for value in nutrition_callbacks(second_search.message.outbound[-1][1]["reply_markup"])
+        if value.startswith("nutrition:ref_pick:")
+    )
+    run(ctl.handle_callback(make_update(callback_data=second_pick), context))
+    run(ctl.handle_text(make_update(text="180"), context))
+
+    finish = make_update(callback_data="nutrition:ref_finish")
+    run(ctl.handle_callback(finish, context))
+    draft_text = finish.callback_query.message.outbound[-1][0]
+    meal_id = int(re.search(r"#(\d+)", draft_text).group(1))
+    meal = store.get_owned_draft(client_telegram_id=CLIENT_ID, meal_id=meal_id)
+    assert len(meal["items"]) == 2
+    assert all(item["calculation_method"] == "reference" for item in meal["items"])
+    assert len({item["reference_fdc_id"] for item in meal["items"]}) == 2
+
+
+def test_xlsx_preview_has_no_write_and_confirm_rechecks_access(store, monkeypatch):
+    ctl = controller(store, trainer_ids={TRAINER_ID})
+    _linked_confirmed_meal(store, ctl)
+    client = store.get_user_by_telegram_id(CLIENT_ID)
+    context = make_context(state={"nutrition_active": True})
+    open_upload = make_update(
+        user_id=TRAINER_ID, callback_data=f"nutrition:trainer_plan_upload:{client['id']}"
+    )
+    run(ctl.handle_callback(open_upload, context))
+    monkeypatch.setattr(
+        nutrition_bot_module,
+        "parse_plan",
+        lambda payload: [SimpleNamespace(
+            effective_from=date(2033, 5, 18), calories=2000, protein_g=120,
+            fat_g=70, carbs_g=240, water_ml=2200,
+        )],
+    )
+    document = SimpleNamespace(file_name="plan.xlsx", file_size=100, file_id="xlsx-file")
+    upload = make_update(user_id=TRAINER_ID, document=document)
+    run(ctl.handle_document(upload, context))
+    assert context.user_data["nutrition_state"] == "trainer_plan_preview"
+    assert store.get_client_day(TRAINER_ID, client["id"], "2033-05-18")["norms"] is None
+
+    store.unlink_client(trainer_telegram_id=TRAINER_ID, client_id=client["id"])
+    confirm_callback = next(
+        value for value in nutrition_callbacks(upload.message.outbound[-1][1]["reply_markup"])
+        if value.startswith("nutrition:trainer_plan_confirm:")
+    )
+    confirm = make_update(user_id=TRAINER_ID, callback_data=confirm_callback)
+    run(ctl.handle_callback(confirm, context))
+    assert "не привязан" in confirm.callback_query.message.outbound[-1][0]
+
+
+def test_reference_no_match_returns_to_current_work_and_revokes_old_candidates(store):
+    ctl = controller(store)
+    ctl._ensure_user(make_update())
+    valid = ctl.reference.search("banana raw", limit=1)[0]
+    context = make_context(state={
+        "nutrition_active": True,
+        "nutrition_state": "reference_search",
+        "nutrition_reference_mode": "build",
+        "nutrition_reference_items": [{"name": "already selected"}],
+        "nutrition_reference_candidates": [valid.fdc_id],
+    })
+
+    no_match = make_update(text="творог 9%")
+    run(ctl.handle_text(no_match, context))
+    callbacks = nutrition_callbacks(no_match.message.outbound[-1][1]["reply_markup"])
+    assert "nutrition:ref_review" in callbacks
+    assert "nutrition_reference_candidates" not in context.user_data
+
+    stale = make_update(callback_data=f"nutrition:ref_pick:{valid.fdc_id}")
+    run(ctl.handle_callback(stale, context))
+    assert "уже недоступен" in stale.callback_query.message.outbound[-1][0]
+
+    context.user_data.update({
+        "nutrition_reference_mode": "refine",
+        "nutrition_reference_meal_id": 77,
+        "nutrition_reference_candidates": [valid.fdc_id],
+    })
+    refine_no_match = make_update(text="творог 9%")
+    run(ctl.handle_text(refine_no_match, context))
+    refine_callbacks = nutrition_callbacks(
+        refine_no_match.message.outbound[-1][1]["reply_markup"]
+    )
+    assert "nutrition:refine:77" in refine_callbacks
+    assert "nutrition_reference_candidates" not in context.user_data
+
+
+def test_day_summary_shows_all_norm_units_and_distinguishes_zero_from_none():
+    summary = {
+        "client": {"display_name": "Клиент"},
+        "date": "2033-05-18",
+        "meals": [],
+        "totals": {"calories": 0, "protein_g": 0, "fat_g": 0, "carbs_g": 0},
+        "water_ml": 0,
+        "norms": {
+            "effective_from": "2033-05-18",
+            "calories": 0,
+            "protein_g": None,
+            "fat_g": 0,
+            "carbs_g": 240,
+            "water_ml": None,
+        },
+    }
+
+    text = NutritionBotController._format_day(summary)
+    assert "0 ккал/сутки" in text
+    assert "Б не задано г/сутки" in text
+    assert "Ж 0 г/сутки" in text
+    assert "У 240 г/сутки" in text
+    assert "вода не задано мл/сутки" in text
+
+
+def test_start_help_and_diary_button_interrupt_pending_nutrition_input(monkeypatch):
+    monkeypatch.setenv("NUTRITION_DASHBOARD_ENABLED", "0")
+    root = load_root_with_fakes(monkeypatch, lambda *args, **kwargs: None)
+    bot = root.TelegramSMMBot()
+
+    class ResetNutrition:
+        @staticmethod
+        def reset(context):
+            for key in list(context.user_data):
+                if key.startswith("nutrition_"):
+                    context.user_data.pop(key)
+
+        @staticmethod
+        def is_active(context):
+            return bool(context.user_data.get("nutrition_active"))
+
+        async def start(self, update, context):
+            self.reset(context)
+            context.user_data["nutrition_active"] = True
+            await update.effective_message.reply_text("Дневник")
+
+    bot.nutrition = ResetNutrition()
+    pending = {
+        "nutrition_active": True,
+        "nutrition_state": "trainer_comment_text",
+        "nutrition_trainer_meal_id": 77,
+    }
+
+    start_context = make_context(state=pending)
+    run(bot.start_command(make_update(text="/start"), start_context))
+    assert not any(key.startswith("nutrition_") for key in start_context.user_data)
+
+    help_context = make_context(state=pending)
+    run(bot.help_command(make_update(text="/help"), help_context))
+    assert help_context.user_data == {"nutrition_active": True}
+
+    diary_context = make_context(state=pending)
+    run(bot.text_handler(make_update(text="🥗 Дневник питания"), diary_context))
+    assert diary_context.user_data == {"nutrition_active": True}
+
+
+def test_norms_back_keeps_entered_value_and_date(store):
+    ctl = controller(store, trainer_ids={TRAINER_ID})
+    _linked_confirmed_meal(store, ctl)
+    client = store.get_user_by_telegram_id(CLIENT_ID)
+    context = make_context(state={"nutrition_active": True})
+    opened = make_update(
+        user_id=TRAINER_ID, callback_data=f"nutrition:trainer_norms:{client['id']}"
+    )
+    run(ctl.handle_callback(opened, context))
+    today_callback = next(
+        value for value in nutrition_callbacks(opened.callback_query.edits[-1][1]["reply_markup"])
+        if value.startswith("nutrition:norms_date:") and value.endswith(":today")
+    )
+    run(ctl.handle_callback(make_update(user_id=TRAINER_ID, callback_data=today_callback), context))
+    protein_prompt = make_update(user_id=TRAINER_ID, text="2000")
+    run(ctl.handle_text(protein_prompt, context))
+
+    back_to_calories = next(
+        value for value in nutrition_callbacks(protein_prompt.message.outbound[-1][1]["reply_markup"])
+        if value.startswith("nutrition:norms_back:")
+    )
+    calories_again = make_update(user_id=TRAINER_ID, callback_data=back_to_calories)
+    run(ctl.handle_callback(calories_again, context))
+    markup = calories_again.callback_query.message.outbound[-1][1]["reply_markup"]
+    entered = next(
+        button for row in markup.inline_keyboard for button in row
+        if button.callback_data and button.callback_data.endswith(":keep_draft")
+    )
+    assert "2000" in entered.text
+
+    back_to_date = next(
+        value for value in nutrition_callbacks(markup)
+        if value.startswith("nutrition:norms_back:")
+    )
+    date_again = make_update(user_id=TRAINER_ID, callback_data=back_to_date)
+    run(ctl.handle_callback(date_again, context))
+    assert "Сейчас выбрано:" in date_again.callback_query.edits[-1][0]
+    assert context.user_data["nutrition_norms_draft"]["calories"] == 2000
+
+
+def test_stale_norms_confirm_from_another_client_writes_nothing(store):
+    ctl = controller(store, trainer_ids={TRAINER_ID})
+    ctl._ensure_user(make_update(user_id=TRAINER_ID))
+    client_ids = []
+    for telegram_id in (3101, 3102):
+        client = store.ensure_user(telegram_id=telegram_id, display_name=f"Client {telegram_id}")
+        code = store.create_trainer_invite(trainer_telegram_id=TRAINER_ID)["code"]
+        store.link_client_by_code(client_telegram_id=telegram_id, code=code)
+        client_ids.append(client["id"])
+    context = make_context(state={"nutrition_active": True})
+
+    def build_preview(client_id, base):
+        opened = make_update(
+            user_id=TRAINER_ID, callback_data=f"nutrition:trainer_norms:{client_id}"
+        )
+        run(ctl.handle_callback(opened, context))
+        today_callback = next(
+            value for value in nutrition_callbacks(opened.callback_query.edits[-1][1]["reply_markup"])
+            if value.startswith("nutrition:norms_date:") and value.endswith(":today")
+        )
+        run(ctl.handle_callback(
+            make_update(user_id=TRAINER_ID, callback_data=today_callback), context
+        ))
+        prompt = None
+        for value in (str(base), "120", "70", "240", "2200"):
+            prompt = make_update(user_id=TRAINER_ID, text=value)
+            run(ctl.handle_text(prompt, context))
+        return next(
+            value for value in nutrition_callbacks(prompt.message.outbound[-1][1]["reply_markup"])
+            if value.startswith("nutrition:norms_confirm:")
+        )
+
+    old_confirm = build_preview(client_ids[0], 2000)
+    build_preview(client_ids[1], 2100)
+    stale = make_update(user_id=TRAINER_ID, callback_data=old_confirm)
+    run(ctl.handle_callback(stale, context))
+    assert "устарел" in stale.callback_query.message.outbound[-1][0]
+    for client_id in client_ids:
+        today = ctl._today_for_client(TRAINER_ID, client_id)
+        assert store.get_client_day(TRAINER_ID, client_id, today)["norms"] is None
+
+
+def test_stale_xlsx_confirm_from_another_client_writes_nothing(store, monkeypatch):
+    ctl = controller(store, trainer_ids={TRAINER_ID})
+    ctl._ensure_user(make_update(user_id=TRAINER_ID))
+    client_ids = []
+    for telegram_id in (3201, 3202):
+        client = store.ensure_user(telegram_id=telegram_id, display_name=f"Client {telegram_id}")
+        code = store.create_trainer_invite(trainer_telegram_id=TRAINER_ID)["code"]
+        store.link_client_by_code(client_telegram_id=telegram_id, code=code)
+        client_ids.append(client["id"])
+    monkeypatch.setattr(
+        nutrition_bot_module,
+        "parse_plan",
+        lambda payload: [SimpleNamespace(
+            effective_from=date(2033, 5, 18), calories=2000, protein_g=120,
+            fat_g=70, carbs_g=240, water_ml=2200,
+        )],
+    )
+    context = make_context(state={"nutrition_active": True})
+
+    def upload_preview(client_id):
+        opened = make_update(
+            user_id=TRAINER_ID,
+            callback_data=f"nutrition:trainer_plan_upload:{client_id}",
+        )
+        run(ctl.handle_callback(opened, context))
+        document = SimpleNamespace(file_name="plan.xlsx", file_size=100, file_id="xlsx-file")
+        upload = make_update(user_id=TRAINER_ID, document=document)
+        run(ctl.handle_document(upload, context))
+        return next(
+            value for value in nutrition_callbacks(upload.message.outbound[-1][1]["reply_markup"])
+            if value.startswith("nutrition:trainer_plan_confirm:")
+        )
+
+    old_confirm = upload_preview(client_ids[0])
+    upload_preview(client_ids[1])
+    stale = make_update(user_id=TRAINER_ID, callback_data=old_confirm)
+    run(ctl.handle_callback(stale, context))
+    assert "устарел" in stale.callback_query.message.outbound[-1][0]
+    for client_id in client_ids:
+        assert store.get_client_day(TRAINER_ID, client_id, "2033-05-18")["norms"] is None
