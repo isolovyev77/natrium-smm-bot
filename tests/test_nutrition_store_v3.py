@@ -202,6 +202,36 @@ def test_confirmed_meal_client_edit_is_versioned_and_audited(tmp_path):
     assert history[-1]["action"] == "client_update"
 
 
+def test_confirm_meal_checks_version_but_keeps_successful_replay_idempotent(tmp_path):
+    store, _, _, _ = prepared_store(tmp_path)
+    draft = store.create_meal_draft(
+        client_telegram_id=202, source="manual",
+        eaten_at="2026-09-08T10:00:00+03:00", meal_type="обед",
+        items=[{
+            "name": "Блюдо", "weight_g": 100, "calories": 100,
+            "protein_g": 1, "fat_g": 2, "carbs_g": 3,
+        }],
+    )
+    changed = store.update_meal_as_client(
+        client_telegram_id=202, meal_id=draft["id"],
+        updates={"note": "изменено"}, expected_version=draft["version"],
+    )
+    with pytest.raises(RuntimeError, match="stale_version"):
+        store.confirm_meal(
+            client_telegram_id=202, meal_id=draft["id"],
+            idempotency_key="confirm-version", expected_version=draft["version"],
+        )
+    confirmed = store.confirm_meal(
+        client_telegram_id=202, meal_id=draft["id"],
+        idempotency_key="confirm-version", expected_version=changed["version"],
+    )
+    replay = store.confirm_meal(
+        client_telegram_id=202, meal_id=draft["id"],
+        idempotency_key="confirm-version", expected_version=changed["version"],
+    )
+    assert confirmed == replay
+
+
 def test_plan_preview_is_bound_to_actor_client_and_consumed_once(tmp_path):
     store, _, client, _ = prepared_store(tmp_path)
     preview = store.create_plan_preview(

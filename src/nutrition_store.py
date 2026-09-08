@@ -1112,16 +1112,22 @@ class NutritionStore:
         client_telegram_id: int,
         meal_id: int,
         idempotency_key: str,
+        expected_version: int | None = None,
     ) -> dict[str, Any]:
         user = self._require_user(client_telegram_id)
         if not idempotency_key.strip():
             raise ValueError("Нужен ключ идемпотентности")
         with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
             meal = self._require_owned_meal(db, user["id"], meal_id)
             if meal["status"] == "confirmed":
+                if meal["confirmation_key"] != idempotency_key:
+                    raise ValueError("Прием пищи уже подтвержден")
                 return self._meal_by_id(db, meal_id)
             if meal["status"] == "cancelled":
                 raise ValueError("Отмененный прием пищи нельзя подтвердить")
+            if expected_version is not None and int(meal["version"]) != int(expected_version):
+                raise RuntimeError("stale_version")
             items = db.execute("SELECT * FROM meal_items WHERE meal_id = ?", (meal_id,)).fetchall()
             self._validate_items([dict(item) for item in items], require_portion=True)
             try:
@@ -2168,6 +2174,28 @@ class NutritionStore:
         with self._connection() as db:
             self._require_owned_meal(db, user["id"], meal_id)
             return self._meal_by_id(db, meal_id)
+
+    def get_own_water(self, *, client_telegram_id: int, water_id: int) -> dict[str, Any]:
+        user = self._require_user(client_telegram_id)
+        with self._connection() as db:
+            row = db.execute(
+                "SELECT * FROM water_logs WHERE id=? AND client_user_id=?",
+                (water_id, user["id"]),
+            ).fetchone()
+            if row is None:
+                raise PermissionError("Запись воды не найдена")
+            return dict(row)
+
+    def get_own_weight(self, *, client_telegram_id: int, weight_id: int) -> dict[str, Any]:
+        user = self._require_user(client_telegram_id)
+        with self._connection() as db:
+            row = db.execute(
+                "SELECT * FROM weight_logs WHERE id=? AND client_user_id=?",
+                (weight_id, user["id"]),
+            ).fetchone()
+            if row is None:
+                raise PermissionError("Запись веса не найдена")
+            return dict(row)
 
     def update_meal_as_client(
         self,

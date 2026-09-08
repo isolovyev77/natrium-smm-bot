@@ -91,10 +91,54 @@ class NutritionDashboardFrontendTests(unittest.TestCase):
     def test_failed_dialog_mutations_keep_fields_and_show_error(self):
         self.assertIn('id="dialog-status"', self.html)
         self.assertGreaterEqual(self.script.count("dialogStatus(x.message)"), 4)
-        self.assertIn('"If-Match":String(m.version)', self.script)
+        self.assertIn('"If-Match":String(version)', self.script)
         self.assertIn("Предпросмотр итогов", self.script)
-        self.assertIn("form.dataset.key=form.dataset.key||idempotency()", self.script)
+        self.assertIn("if(!form.dataset.key){form.dataset.key=idempotency()", self.script)
         self.assertIn("button.disabled=true", self.script)
+
+    def test_stale_meal_has_explicit_conflict_resolution(self):
+        self.assertIn("showMealConflict", self.script)
+        self.assertIn("Применить мои изменения поверх новых", self.script)
+        self.assertIn("Принять версию сервера", self.script)
+        self.assertIn("Ваши поля сохранены", self.script)
+        self.assertIn("version=fresh.version", self.script)
+        self.assertIn("Подтвердить актуальный черновик", self.script)
+        self.assertIn("Вернуться без подтверждения", self.script)
+        self.assertIn('api(path(state.mode==="trainer"?"meal":"selfMeal"', self.script)
+
+    def test_all_versioned_forms_offer_fresh_server_choice(self):
+        for text in (
+            "Применить мои настройки поверх новых",
+            "Принять настройки сервера",
+            "Применить мои данные поверх новых",
+            "Принять профиль сервера",
+            "Отменить актуальную запись",
+            "Оставить актуальную запись",
+        ):
+            self.assertIn(text, self.script)
+        self.assertIn('await api(path(water?"waterEntry":"weightEntry"', self.script)
+
+    def test_uncertain_retry_keeps_key_only_for_same_payload(self):
+        self.assertIn("mutationFingerprint", self.script)
+        self.assertIn("form.dataset.keyPayload&&form.dataset.keyPayload!==fingerprint", self.script)
+        self.assertIn("Вернуть отправленные данные", self.script)
+        self.assertIn("restoreMutationPayload", self.script)
+        self.assertIn("error.status&&error.status<500", self.script)
+
+    def test_meal_type_is_localized_in_confirmation_preview(self):
+        self.assertIn("mealTypeLabel(current.meal_type)", self.script)
+        self.assertNotIn('el("h3",meal.meal_type||"Приём пищи")', self.script)
+
+    def test_manual_meal_requires_values_instead_of_coercing_blanks_to_zero(self):
+        self.assertIn("if(f.required)i.required=true", self.script)
+        self.assertIn('name:"calories",type:"number",min:"0",step:"0.1",required:true', self.script)
+        self.assertIn('name:"weight_g",type:"number",min:"0.1",step:"0.1",required:true', self.script)
+        self.assertNotIn('weight_g:d.weight_g===""?null:Number(d.weight_g)', self.script)
+
+    def test_profile_timezone_refreshes_session_without_moving_historical_date(self):
+        self.assertIn("wasToday=state.date===state.session.today", self.script)
+        self.assertIn('const latest=await api(path("session"))', self.script)
+        self.assertIn("if(wasToday)state.date=latest.today||state.date", self.script)
 
     def test_authenticated_binary_resources_do_not_use_direct_image_or_template_urls(self):
         self.assertIn('api(path("photo",{meal:mealId}),{blob:true})', self.script)

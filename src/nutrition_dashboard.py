@@ -972,6 +972,12 @@ def _handler_factory(store: Any, config: DashboardConfig) -> type[BaseHTTPReques
                 return 201, self._data(result)
 
             match = re.fullmatch(r"/api/me/meals/(\d+)", path)
+            if method == "GET" and match:
+                actor, _, _ = self._authenticate()
+                return 200, self._data(store.get_own_meal(
+                    client_telegram_id=actor,
+                    meal_id=_positive_int(match.group(1), "meal_id"),
+                ))
             if method == "PATCH" and match:
                 actor, _, _ = self._authenticate()
                 payload = self._read_json()
@@ -988,6 +994,7 @@ def _handler_factory(store: Any, config: DashboardConfig) -> type[BaseHTTPReques
                 return 200, self._data(store.confirm_meal(
                     client_telegram_id=actor, meal_id=_positive_int(match.group(1), "meal_id"),
                     idempotency_key=self._idempotency_key(self.headers),
+                    expected_version=self._expected_version(self.headers),
                 ))
 
             match = re.fullmatch(r"/api/me/meals/(\d+)/cancel", path)
@@ -1010,6 +1017,12 @@ def _handler_factory(store: Any, config: DashboardConfig) -> type[BaseHTTPReques
                 ))
 
             match = re.fullmatch(r"/api/me/water/(\d+)", path)
+            if method == "GET" and match:
+                actor, _, _ = self._authenticate()
+                return 200, self._data(store.get_own_water(
+                    client_telegram_id=actor,
+                    water_id=_positive_int(match.group(1), "water_id"),
+                ))
             if method == "PATCH" and match:
                 actor, _, _ = self._authenticate()
                 payload = self._read_json()
@@ -1039,6 +1052,12 @@ def _handler_factory(store: Any, config: DashboardConfig) -> type[BaseHTTPReques
                 ))
 
             match = re.fullmatch(r"/api/me/weight/(\d+)", path)
+            if method == "GET" and match:
+                actor, _, _ = self._authenticate()
+                return 200, self._data(store.get_own_weight(
+                    client_telegram_id=actor,
+                    weight_id=_positive_int(match.group(1), "weight_id"),
+                ))
             if method == "PATCH" and match:
                 actor, _, _ = self._authenticate()
                 payload = self._read_json()

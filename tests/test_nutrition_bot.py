@@ -978,6 +978,40 @@ class FakeHelpService:
         return "Встроенная справка."
 
 
+def test_natural_help_from_menu_and_manual_field_preserves_input_state(store):
+    helper = FakeHelpService()
+    ctl = controller(store, help_service=helper)
+    ctl._ensure_user(make_update())
+    context = make_context(state={"nutrition_active": True})
+
+    menu_question = make_update(text="Что вы умеете?")
+    run(ctl.handle_text(menu_question, context))
+    assert helper.calls[-1][0] == "Что вы умеете?"
+    assert helper.calls[-1][1].screen == "Меню дневника"
+    run(ctl.handle_callback(make_update(callback_data="nutrition:help_resume"), context))
+
+    run(ctl.handle_callback(make_update(callback_data="nutrition:meal_manual"), context))
+    run(ctl.handle_text(make_update(text="Рис"), context))
+    nonce = context.user_data["nutrition_manual_nonce"]
+    invalid = make_update(text="сто восемьдесят")
+    run(ctl.handle_text(invalid, context))
+    assert "введите число" in invalid.message.outbound[-1][0]
+    assert context.user_data["nutrition_manual_step"] == 1
+
+    field_question = make_update(text="Зачем нужна масса всей порции?")
+    run(ctl.handle_text(field_question, context))
+    assert helper.calls[-1][0] == "Зачем нужна масса всей порции?"
+    saved = context.user_data["nutrition_help_return"]
+    assert saved["nutrition_manual_nonce"] == nonce
+    assert saved["nutrition_manual_step"] == 1
+    assert saved["nutrition_manual_item"] == {"name": "Рис"}
+
+    run(ctl.handle_callback(make_update(callback_data="nutrition:help_resume"), context))
+    assert context.user_data["nutrition_manual_nonce"] == nonce
+    assert context.user_data["nutrition_manual_step"] == 1
+    assert context.user_data["nutrition_manual_item"] == {"name": "Рис"}
+
+
 def test_help_inside_norms_preserves_draft_step_and_nonce(store):
     helper = FakeHelpService()
     ctl = controller(store, trainer_ids={TRAINER_ID}, help_service=helper)

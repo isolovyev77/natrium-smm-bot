@@ -332,3 +332,103 @@ def test_client_can_soft_cancel_confirmed_meal_with_version_and_audit(tmp_path):
             "SELECT COUNT(*) FROM audit_log WHERE action='cancel_confirmed' AND entity_id=?",
             (meal["id"],),
         ).fetchone()[0] == 1
+
+
+def test_self_detail_routes_return_cancelled_own_objects_and_hide_foreign_ids(tmp_path):
+    store, _ = prepared_store(tmp_path)
+    meal = store.create_meal_draft(
+        client_telegram_id=CLIENT_1, source="manual",
+        eaten_at="2026-09-08T10:00:00+03:00", meal_type="lunch",
+        items=[{
+            "name": "Обед", "weight_g": 300, "calories": 500,
+            "protein_g": 25, "fat_g": 15, "carbs_g": 60,
+        }],
+    )
+    meal = store.cancel_meal(
+        client_telegram_id=CLIENT_1, meal_id=meal["id"],
+        expected_version=meal["version"],
+    )
+    water = store.add_water(
+        client_telegram_id=CLIENT_1, amount_ml=250,
+        logged_at="2026-09-08T10:00:00+03:00", idempotency_key="detail-water",
+    )
+    water = store.cancel_water(
+        client_telegram_id=CLIENT_1, water_id=water["id"],
+        expected_version=water["version"],
+    )
+    weight = store.add_weight(
+        client_telegram_id=CLIENT_1, weight_kg=70,
+        measured_at="2026-09-08T10:00:00+03:00", idempotency_key="detail-weight",
+    )
+    weight = store.cancel_weight(
+        client_telegram_id=CLIENT_1, weight_id=weight["id"],
+        expected_version=weight["version"],
+    )
+    own_paths = (
+        f"/api/me/meals/{meal['id']}",
+        f"/api/me/water/{water['id']}",
+        f"/api/me/weight/{weight['id']}",
+    )
+    for path in own_paths:
+        status, _, raw = request(
+            store, "GET", path, init_data=signed_init_data(CLIENT_1)
+        )
+        assert status == 200
+        assert json.loads(raw)["data"]["status"] == "cancelled"
+        assert request(
+            store, "GET", path, init_data=signed_init_data(CLIENT_2)
+        )[0] == 404
+    for kind in ("meals", "water", "weight"):
+        assert request(
+            store, "GET", f"/api/me/{kind}/999999",
+            init_data=signed_init_data(CLIENT_1),
+        )[0] == 404
+
+
+def test_confirm_rejects_stale_preview_then_accepts_fresh_version_and_replay(tmp_path):
+    store, _ = prepared_store(tmp_path)
+    draft = store.create_meal_draft(
+        client_telegram_id=CLIENT_1, source="manual",
+        eaten_at="2026-09-08T10:00:00+03:00", meal_type="lunch",
+        items=[{
+            "name": "Обед", "weight_g": 300, "calories": 500,
+            "protein_g": 25, "fat_g": 15, "carbs_g": 60,
+        }],
+    )
+    preview_version = draft["version"]
+    moved = request(
+        store, "PATCH", f"/api/me/meals/{draft['id']}",
+        init_data=signed_init_data(CLIENT_1),
+        headers={"If-Match": str(preview_version)},
+        payload={"eaten_at": "2026-09-09T10:00:00+03:00"},
+    )
+    assert moved[0] == 200
+    current = json.loads(moved[2])["data"]
+    confirm_headers = {
+        "If-Match": str(preview_version),
+        "Idempotency-Key": "confirm-after-refresh",
+    }
+    stale = request(
+        store, "POST", f"/api/me/meals/{draft['id']}/confirm",
+        init_data=signed_init_data(CLIENT_1), headers=confirm_headers,
+    )
+    assert stale[0] == 409
+    fetched = request(
+        store, "GET", f"/api/me/meals/{draft['id']}",
+        init_data=signed_init_data(CLIENT_1),
+    )
+    fetched_meal = json.loads(fetched[2])["data"]
+    assert fetched[0] == 200
+    assert fetched_meal["version"] == current["version"]
+    assert fetched_meal["local_date"] == "2026-09-09"
+    confirm_headers["If-Match"] = str(fetched_meal["version"])
+    fresh = request(
+        store, "POST", f"/api/me/meals/{draft['id']}/confirm",
+        init_data=signed_init_data(CLIENT_1), headers=confirm_headers,
+    )
+    replay = request(
+        store, "POST", f"/api/me/meals/{draft['id']}/confirm",
+        init_data=signed_init_data(CLIENT_1), headers=confirm_headers,
+    )
+    assert fresh[0] == replay[0] == 200
+    assert json.loads(fresh[2])["data"] == json.loads(replay[2])["data"]

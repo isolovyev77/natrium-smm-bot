@@ -138,15 +138,23 @@ JSON не выходит.
 - `GET /api/me/day?date=YYYY-MM-DD`
 - `GET /api/me/summary?from=YYYY-MM-DD&to=YYYY-MM-DD&bucket=day`
 - `GET /api/me/meals?from=...&to=...&cursor=...&limit=20`
+- `GET /api/me/meals/{meal_id}` возвращает текущее состояние записи независимо
+  от ее переноса на другую дату, включая мягко отмененную запись.
 - `POST /api/me/meals/drafts`
 - `PATCH /api/me/meals/{meal_id}`
-- `POST /api/me/meals/{meal_id}/confirm`
+- `POST /api/me/meals/{meal_id}/confirm` с обязательными `If-Match` и
+  `Idempotency-Key`. Измененный после предпросмотра черновик отвечает 409;
+  повтор уже успешного подтверждения с тем же ключом возвращает тот же прием.
 - `POST /api/me/meals/{meal_id}/cancel` с `If-Match` для мягкой отмены
   черновика или подтвержденной записи.
 - `POST /api/me/water` с `amount_ml`, `logged_at`.
+- `GET /api/me/water/{water_id}` возвращает текущую собственную запись, включая
+  мягко отмененную.
 - `PATCH /api/me/water/{water_id}` и `DELETE /api/me/water/{water_id}` для
   исправления и мягкой отмены с аудитом и версией.
 - `POST /api/me/weight` с `weight_kg`, `measured_at`, необязательным `note`.
+- `GET /api/me/weight/{weight_id}` возвращает текущую собственную запись,
+  включая мягко отмененную.
 - `PATCH /api/me/weight/{weight_id}` и `DELETE /api/me/weight/{weight_id}`.
 - `GET /api/me/norms?on=YYYY-MM-DD`
 - `GET /api/me/trainer`

@@ -83,6 +83,14 @@ _COMMENT_HELP_PATTERNS = (
     r"где\s+.*комментар",
     r"комментар.*(?:кноп|бот|дневник|клиент|прием|запис)",
 )
+_GENERAL_HELP_PATTERNS = (
+    r"^что\s+(?:(?:вы|ты|бот)\s+)?уме(?:ете|ешь|ет)",
+    r"^что\s+(?:(?:вы|ты|бот)\s+)?мож(?:ете|ешь|ет)",
+    r"^чем\s+(?:вы|ты|бот)\s+(?:может|можешь)",
+    r"^как\s+(?:вы|ты|бот)\s+(?:может|можешь).*помоч",
+    r"^(?:что|какие)\s+(?:здесь\s+)?(?:можно|доступно|функци)",
+    r"^как\s+(?:этим|дневником|ботом)\s+пользоват",
+)
 
 
 def is_help_question(text: str, *, state: str | None = None) -> bool:
@@ -99,6 +107,8 @@ def is_help_question(text: str, *, state: str | None = None) -> bool:
         return "бот" in value or "кноп" in value or "меню" in value or any(
             re.search(pattern, value) for pattern in _COMMENT_HELP_PATTERNS
         )
+    if state in {None, "menu"} and has_question_form and _is_general_help_intent(value):
+        return True
     wizard_states = {
         "reference_search", "reference_grams", "reference_reweight", "wait_photo",
         "wait_manual", "manual_only", "clarify_ai", "edit_draft", "wait_water",
@@ -116,13 +126,29 @@ def is_help_question(text: str, *, state: str | None = None) -> bool:
     }
     wizard_help_words = (
         "грамм", "процент", "единиц", "формат", "дат", "сколько", "не понял",
-        "не понимаю", "запутал", "что ввод", "что указ",
+        "не понимаю", "запутал", "что ввод", "что указ", "что сюда пис",
+        "что в этом поле", "что означает поле",
     )
     if state in wizard_states and any(word in value for word in wizard_help_words):
+        return True
+    wizard_fields = (
+        "масса", "калори", "белк", "жир", "углевод", "рост", "цель",
+        "часовой пояс", "дата", "время", "интервал", "тихие часы",
+        "голод", "настроение",
+    )
+    if (
+        state in wizard_states
+        and value.startswith(("зачем ", "почему "))
+        and any(field in value for field in wizard_fields)
+    ):
         return True
     if not has_question_form:
         return False
     return any(word in value for word in _INTERFACE_WORDS)
+
+
+def _is_general_help_intent(value: str) -> bool:
+    return any(re.search(pattern, value) for pattern in _GENERAL_HELP_PATTERNS)
 
 
 def _safe_question_for_ai(text: str) -> str | None:
@@ -319,6 +345,8 @@ class NutritionHelp:
     ) -> str | None:
         """Возвращает только однозначный маршрут по существующим кнопкам."""
         value = question.casefold().replace("ё", "е")
+        if context.state in {"menu", ""} and _is_general_help_intent(value):
+            return cls._generic_answer(context)
         asks_how = value.startswith(("как ", "где ", "куда ")) or "кнопк" in value
         action = asks_how and any(
             stem in value
@@ -374,8 +402,15 @@ class NutritionHelp:
                 "заключить, что человек не ел: прием мог быть не внесен в дневник."
             )
         if context.state == "manual_item":
+            field = context.screen.removeprefix("Ручной ввод: ")
+            if field.startswith("Масса всей порции"):
+                return (
+                    f"Сейчас поле «{field}». Укажите общий вес всей порции, для которой "
+                    "далее вводите калории и БЖУ. Значение вводится в граммах, например 180. "
+                    "«⬅️ Назад» сохраняет название продукта."
+                )
             return (
-                f"Сейчас поле «{context.screen.removeprefix('Ручной ввод: ')}». "
+                f"Сейчас поле «{field}». "
                 "Введите только это значение. «⬅️ Назад» вернет к предыдущему полю, "
                 "«Отмена» выйдет без создания черновика."
             )

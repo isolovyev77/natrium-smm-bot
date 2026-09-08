@@ -66,7 +66,15 @@ def test_question_detection_is_interface_specific_and_does_not_capture_comment_t
     assert is_help_question("Не понял, что вводить", state="weight_time")
     assert is_help_question("Где посмотреть статистику?", state=None)
     assert is_help_question("Отправь клиенту комментарий про овощи", state=None)
+    assert is_help_question("Что вы умеете?", state=None)
+    assert is_help_question("Что ты умеешь?", state=None)
+    assert is_help_question("Что умеешь?", state=None)
+    assert is_help_question("Что можешь?", state=None)
+    assert is_help_question("Зачем нужна масса всей порции?", state="manual_item")
+    assert is_help_question("Что сюда писать?", state="manual_item")
     assert not is_help_question("Как прошла тренировка?", state="trainer_comment_text")
+    assert not is_help_question("Как прошла тренировка?", state="mealctx_note")
+    assert not is_help_question("Салат?", state="manual_item")
     assert not is_help_question("Добавьте, пожалуйста, больше овощей", state="trainer_comment_text")
     assert not is_help_question("Творог и яблоко, порция 250 г?", state="wait_manual")
 
@@ -192,6 +200,9 @@ def test_known_routes_skip_provider_and_use_exact_local_instructions():
     assert "«💬 Комментарий»" in answer
     assert "подтвержденные приемы" in answer
     assert "«🎯 Задать нормы»" in answer
+    general = helper.answer("Что умеешь?", context("client"))
+    assert client.responses.calls == []
+    assert "добавление приема пищи и воды" in general
 
 
 def test_question_limits_are_enforced():
@@ -263,6 +274,16 @@ def test_confused_wizard_question_uses_exact_safe_field_metadata():
     )
     assert "Местное время измерения веса, ЧЧ:ММ" in weight
     assert "часовом поясе профиля" in weight
+
+    portion = NutritionHelp(api_key="").answer(
+        "Зачем нужна масса всей порции?",
+        NutritionHelpContext(
+            role="client", state="manual_item",
+            screen="Ручной ввод: Масса всей порции, г, например: 180",
+        ),
+    )
+    assert "общий вес всей порции" in portion
+    assert "в граммах" in portion
 
 
 def test_help_never_claims_that_it_sent_a_comment():
