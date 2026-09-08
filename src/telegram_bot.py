@@ -15,6 +15,7 @@ from src.openai_bot import OpenAIBot
 from src.nutrition_ai import NutritionAI
 from src.nutrition_bot import NutritionBotController, parse_trainer_ids
 from src.nutrition_dashboard import create_dashboard_from_env
+from src.nutrition_reminders import ReminderEngine, ReminderLoop
 from src.nutrition_store import NutritionStore
 from src.config import TELEGRAM_BOT_TOKEN
 
@@ -410,7 +411,10 @@ class TelegramSMMBot:
         self.nutrition_store = None
         self.nutrition = None
         self.nutrition_dashboard = None
+        self.nutrition_reminder_engine = None
+        self.nutrition_reminder_loop = None
         self.nutrition_error = None
+        trainer_ids = set()
         try:
             nutrition_db_path = os.getenv(
                 "NUTRITION_DB_PATH", "data/nutrition/nutrition.sqlite3"
@@ -448,6 +452,19 @@ class TelegramSMMBot:
             .post_shutdown(self._post_shutdown)
             .build()
         )
+        if (
+            self.nutrition_store is not None
+            and os.getenv("NUTRITION_REMINDERS_ENABLED", "0") == "1"
+        ):
+            self.nutrition_reminder_engine = ReminderEngine(
+                self.nutrition_store,
+                self._send_nutrition_reminder,
+                allowed_trainer_ids=trainer_ids,
+            )
+            self.nutrition_reminder_loop = ReminderLoop(
+                self.nutrition_reminder_engine,
+                on_error=self._log_nutrition_reminder_error,
+            )
         
         # Постоянная клавиатура с кнопками
         self.main_keyboard = ReplyKeyboardMarkup(
@@ -473,24 +490,36 @@ class TelegramSMMBot:
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_handler))
 
     async def _post_init(self, application: Application) -> None:
-        if self.nutrition_dashboard is None:
-            return
-        try:
-            self.nutrition_dashboard.start()
-            logger.info("Nutrition dashboard listener started")
-        except Exception:
-            logger.exception("Nutrition dashboard failed to start; bot continues without web panel")
-            if self.nutrition is not None:
-                self.nutrition.dashboard_origin = ""
-            self.nutrition_dashboard = None
+        if self.nutrition_dashboard is not None:
+            try:
+                self.nutrition_dashboard.start()
+                logger.info("Nutrition dashboard listener started")
+            except Exception:
+                logger.exception("Nutrition dashboard failed to start; bot continues without web panel")
+                if self.nutrition is not None:
+                    self.nutrition.dashboard_origin = ""
+                self.nutrition_dashboard = None
+        if self.nutrition_reminder_loop is not None:
+            self.nutrition_reminder_loop.start()
+            logger.info("Nutrition reminder scheduler started")
 
     async def _post_shutdown(self, application: Application) -> None:
+        if self.nutrition_reminder_loop is not None:
+            await self.nutrition_reminder_loop.stop()
+            logger.info("Nutrition reminder scheduler stopped")
         if self.nutrition_dashboard is not None:
             try:
                 self.nutrition_dashboard.stop()
                 logger.info("Nutrition dashboard listener stopped")
             except Exception:
                 logger.exception("Nutrition dashboard failed to stop cleanly")
+
+    @staticmethod
+    def _log_nutrition_reminder_error(exc: Exception) -> None:
+        logger.error("Nutrition reminder tick failed: %s", type(exc).__name__)
+
+    async def _send_nutrition_reminder(self, telegram_id: int, text: str) -> None:
+        await self.application.bot.send_message(chat_id=telegram_id, text=text)
 
     async def _nutrition_unavailable(self, update: Update) -> None:
         await update.effective_message.reply_text(

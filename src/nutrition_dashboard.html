@@ -1,379 +1,100 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <title>Дневник питания Natrium</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <style nonce="__CSP_NONCE__">
-    :root {
-      --ink: #17221d;
-      --muted: #68746e;
-      --paper: #f5f7f3;
-      --card: #ffffff;
-      --line: #dfe6df;
-      --brand: #1f7a50;
-      --brand-dark: #15583a;
-      --soft: #eaf4ee;
-      --danger: #a33a35;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--paper); color: var(--ink); }
-    button, input, select, textarea { font: inherit; }
-    button, select, input, textarea { min-height: 44px; }
-    button { border: 0; border-radius: 12px; padding: 10px 15px; background: var(--brand); color: white; cursor: pointer; }
-    button:hover { background: var(--brand-dark); }
-    button.secondary { background: var(--soft); color: var(--brand-dark); }
-    button.ghost { background: transparent; color: var(--brand-dark); border: 1px solid var(--line); }
-    button:disabled { opacity: .55; cursor: wait; }
-    input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; background: white; color: var(--ink); }
-    textarea { min-height: 82px; resize: vertical; }
-    label { display: grid; gap: 5px; color: var(--muted); font-size: 13px; }
-    .shell { width: min(1040px, 100%); margin: 0 auto; padding: 20px; }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-    h1 { margin: 0; font-size: clamp(24px, 5vw, 36px); letter-spacing: -.03em; }
-    h2, h3 { margin: 0; }
-    .eyebrow { margin: 0 0 4px; color: var(--brand); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: 0 7px 25px rgba(38, 64, 50, .05); }
-    .toolbar { display: grid; grid-template-columns: minmax(200px, 1fr) auto auto; gap: 10px; align-items: end; margin-bottom: 14px; }
-    .tabs { display: flex; gap: 8px; }
-    .tabs button[aria-pressed="true"] { background: var(--brand-dark); }
-    .summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
-    .metric { padding: 13px; background: var(--soft); border-radius: 13px; }
-    .metric span { display: block; color: var(--muted); font-size: 12px; }
-    .metric strong { display: block; margin-top: 4px; font-size: 19px; }
-    .split { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr); gap: 14px; }
-    .stack { display: grid; gap: 10px; }
-    .meal { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 13px 0; border-bottom: 1px solid var(--line); }
-    .meal:last-child { border-bottom: 0; }
-    .meal p { margin: 4px 0 0; color: var(--muted); }
-    .audit { font-size: 12px; color: var(--muted); }
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
-    .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-    .status { min-height: 24px; margin: 0 0 10px; color: var(--muted); }
-    .status.error { color: var(--danger); }
-    .empty { padding: 24px 8px; color: var(--muted); text-align: center; }
-    .week-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    .week-table th, .week-table td { padding: 10px 7px; text-align: right; border-bottom: 1px solid var(--line); }
-    .week-table th:first-child, .week-table td:first-child { text-align: left; }
-    .hidden { display: none !important; }
-    dialog { width: min(560px, calc(100% - 24px)); border: 1px solid var(--line); border-radius: 16px; padding: 18px; color: var(--ink); }
-    dialog::backdrop { background: rgba(18, 35, 27, .38); }
-    @media (max-width: 760px) {
-      .shell { padding: 14px; }
-      header, .split { display: grid; grid-template-columns: 1fr; }
-      .toolbar { grid-template-columns: 1fr; }
-      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .summary .metric:first-child { grid-column: 1 / -1; }
-      .form-grid { grid-template-columns: 1fr; }
-      .week-wrap { overflow-x: auto; }
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Дневник питания Natrium</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style nonce="__CSP_NONCE__">
+:root{--ink:#17221d;--muted:#68746e;--paper:#f4f7f3;--card:#fff;--line:#dbe5dd;--brand:#1f7a50;--brand-dark:#15583a;--soft:#eaf4ee;--warn:#956000;--danger:#a33a35;--shadow:0 8px 28px rgba(38,64,50,.07);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;min-width:320px;background:var(--paper);color:var(--ink)}button,input,select,textarea{font:inherit}button,input,select,textarea,a.action{min-height:44px}button{border:0;border-radius:12px;padding:10px 14px;background:var(--brand);color:#fff;cursor:pointer}button:hover{background:var(--brand-dark)}button.secondary{background:var(--soft);color:var(--brand-dark)}button.ghost{border:1px solid var(--line);background:transparent;color:var(--brand-dark)}button:disabled{opacity:.55;cursor:wait}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #e8a53a;outline-offset:2px}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--card);color:var(--ink)}textarea{min-height:86px;resize:vertical}label{display:grid;gap:5px;color:var(--muted);font-size:13px}.check{display:flex;align-items:center;gap:8px}.check input{width:auto;min-height:auto}h1,h2,h3,p{margin-top:0}h1{margin-bottom:0;font-size:clamp(24px,5vw,36px);letter-spacing:-.03em}h2{margin-bottom:5px;font-size:20px}h3{margin-bottom:4px;font-size:16px}[hidden],.hidden{display:none!important}.shell{width:min(1240px,100%);margin:auto;padding:calc(14px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom))}.topbar,.top-actions,.inline,.date-nav,.periods,.mode-switch{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.topbar{justify-content:space-between;margin-bottom:14px}.eyebrow{margin:0 0 3px;color:var(--brand);font-size:11px;font-weight:850;letter-spacing:.12em;text-transform:uppercase}.mode-switch{padding:4px;border:1px solid var(--line);border-radius:14px;background:var(--card)}.mode-switch button{min-height:38px;padding:7px 12px;background:transparent;color:var(--muted)}.mode-switch button[aria-selected=true]{background:var(--brand);color:#fff}.status{min-height:24px;margin:0 0 10px;color:var(--muted)}.status.error{color:var(--danger)}.status button{min-height:34px;margin-left:8px;padding:5px 10px}.app{display:grid;grid-template-columns:190px minmax(0,1fr);gap:16px}.nav{position:sticky;top:12px;align-self:start;display:grid;gap:6px;padding:10px;border:1px solid var(--line);border-radius:16px;background:var(--card);box-shadow:var(--shadow)}.nav button{justify-content:flex-start;background:transparent;color:var(--muted);text-align:left}.nav button[aria-selected=true]{background:var(--soft);color:var(--brand-dark);font-weight:800}.trainer{display:grid;grid-template-columns:270px minmax(0,1fr);gap:14px}.card{border:1px solid var(--line);border-radius:16px;padding:16px;background:var(--card);box-shadow:var(--shadow)}.stack{display:grid;gap:12px}.head,.toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}.muted,.help,.audit{color:var(--muted)}.help,.audit{font-size:12px}.clients{align-self:start;max-height:calc(100vh - 120px);overflow:auto}.client-list{display:grid;gap:7px;margin-top:10px}.client{width:100%;display:grid;gap:3px;padding:11px;border:1px solid transparent;background:transparent;color:var(--ink);text-align:left}.client:hover,.client[aria-current=true]{border-color:#b9d3c3;background:var(--soft)}.client small{color:var(--muted)}.date-nav{flex-wrap:nowrap}.date-nav input{width:auto;min-width:145px}.summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.metric{min-width:0;padding:13px;border-radius:13px;background:var(--soft)}.metric span{display:block;color:var(--muted);font-size:12px}.metric strong{display:block;margin:4px 0 7px;font-size:18px;white-space:normal;overflow-wrap:anywhere}.meter{width:100%;height:6px;overflow:hidden;border:0;border-radius:99px;background:#d7e7dc;accent-color:var(--brand)}.meal{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px 0;border-bottom:1px solid var(--line)}.meal:last-child{border-bottom:0}.meal-body{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px}.meal-body.no-photo{grid-template-columns:1fr}.meal-photo{width:64px;height:64px;border-radius:10px;object-fit:cover;background:var(--paper)}.badges{display:flex;gap:6px;flex-wrap:wrap;margin:5px 0}.badge{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:99px;background:#eef1ee;color:var(--muted);font-size:11px;font-weight:800}.badge.ok{background:var(--soft);color:var(--brand-dark)}.badge.warn{background:#fff3dd;color:var(--warn)}.quick{display:flex;gap:8px;flex-wrap:wrap}.charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.chart{min-height:230px}.chart svg{display:block;width:100%;height:170px}.line{fill:none;stroke:var(--brand);stroke-width:3;vector-effect:non-scaling-stroke}.point{fill:var(--brand);stroke:var(--card);stroke-width:2}.point.alt{fill:#bd7d1c}.point.third{fill:#6b55a3}.line.alt{stroke:#bd7d1c}.line.third{stroke:#6b55a3}.gridline{stroke:var(--line);stroke-width:1}.legend{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px}.legend i{display:inline-block;width:12px;height:3px;margin-right:5px;vertical-align:middle;background:var(--brand)}.legend i.alt{background:#bd7d1c}.legend i.third{background:#6b55a3}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px 7px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.upload{padding:16px;border:1px dashed #9eb7a7;border-radius:13px;background:#f7faf7}.empty{padding:28px 10px;color:var(--muted);text-align:center}.skeleton{min-height:88px;border-radius:14px;background:#e9eeea}.bottom{display:none}a.action{display:inline-flex;align-items:center;color:var(--brand-dark);font-weight:700}dialog{width:min(640px,calc(100% - 24px));max-height:calc(100dvh - 24px);overflow:auto;border:1px solid var(--line);border-radius:17px;padding:18px;background:var(--card);color:var(--ink)}dialog::backdrop{background:rgba(18,35,27,.42)}
+@media(max-width:980px){.app{grid-template-columns:160px minmax(0,1fr)}.trainer{grid-template-columns:230px minmax(0,1fr)}.summary{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){.shell{padding:calc(10px + env(safe-area-inset-top)) 12px calc(82px + env(safe-area-inset-bottom))}.topbar{align-items:flex-start}.app,.trainer{display:block}.nav{display:none}.clients{position:static;max-height:none;margin-bottom:12px}.clients[data-selected=true]{display:none}.detail[data-selected=false]{display:none}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.summary .metric:first-child{grid-column:1/-1}.charts,.form-grid{grid-template-columns:1fr}.toolbar,.head{align-items:stretch;flex-direction:column}.date-nav{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;width:100%}.date-nav input{width:100%;min-width:0}.periods{overflow-x:auto;flex-wrap:nowrap}.periods button{flex:0 0 auto}.meal{grid-template-columns:1fr}.bottom{position:fixed;z-index:20;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);gap:2px;padding:7px 8px calc(7px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--card)}.bottom button{min-width:0;padding:7px 3px;background:transparent;color:var(--muted);font-size:11px}.bottom button[aria-selected=true]{color:var(--brand-dark);font-weight:850;background:var(--soft)}}
+</style>
 </head>
-<body>
-  <main class="shell">
-    <header>
-      <div>
-        <p class="eyebrow">Natrium</p>
-        <h1>Дневник питания</h1>
-      </div>
-      <button id="refresh" class="ghost" type="button">Обновить</button>
-    </header>
-
-    <p id="status" class="status" role="status" aria-live="polite"></p>
-
-    <section class="card toolbar" aria-label="Фильтры">
-      <label>Клиент
-        <select id="client"><option value="">Выберите клиента</option></select>
-      </label>
-      <label>Дата
-        <input id="date" type="date">
-      </label>
-      <div class="tabs" role="group" aria-label="Период">
-        <button id="day-tab" type="button" aria-pressed="true">День</button>
-        <button id="week-tab" type="button" class="secondary" aria-pressed="false">Неделя</button>
-      </div>
-    </section>
-
-    <section id="content" class="hidden">
-      <div id="summary" class="summary" aria-label="Итоги"></div>
-      <div id="day-view" class="split">
-        <section class="card">
-          <h2>Приёмы пищи</h2>
-          <p class="status">КБЖУ по фото являются приблизительной оценкой после подтверждения человеком.</p>
-          <div id="meals" class="stack"></div>
-        </section>
-        <section class="card">
-          <h2>Дневные нормы</h2>
-          <p class="status">Нормы вводит тренер. Панель не рассчитывает их автоматически.</p>
-          <form id="norms-form">
-            <div class="form-grid">
-              <label>Ккал<input name="calories" type="number" min="0" step="1"></label>
-              <label>Белки, г<input name="protein_g" type="number" min="0" step="0.1"></label>
-              <label>Жиры, г<input name="fat_g" type="number" min="0" step="0.1"></label>
-              <label>Углеводы, г<input name="carbs_g" type="number" min="0" step="0.1"></label>
-              <label>Вода, мл<input name="water_ml" type="number" min="0" step="1"></label>
-              <label>Действуют с<input name="effective_from" type="date" required></label>
-            </div>
-            <div class="form-actions"><button type="submit">Сохранить нормы</button></div>
-          </form>
-        </section>
-      </div>
-      <section id="week-view" class="card hidden">
-        <h2>Неделя</h2>
-        <div class="week-wrap"><table class="week-table">
-          <thead><tr><th>Дата</th><th>Ккал</th><th>Б</th><th>Ж</th><th>У</th><th>Вода</th></tr></thead>
-          <tbody id="week-days"></tbody>
-        </table></div>
-      </section>
-    </section>
-
-    <dialog id="meal-dialog">
-      <form id="meal-form">
-        <h2>Изменить приём</h2>
-        <input name="meal_id" type="hidden">
-        <label>Тип<input name="meal_type" maxlength="100"></label>
-        <label>Заметка<textarea name="note" maxlength="2000"></textarea></label>
-        <h3>Позиции</h3>
-        <div id="meal-items" class="stack"></div>
-        <label>Комментарий тренера<textarea name="comment" maxlength="2000"></textarea></label>
-        <div class="form-actions">
-          <button id="cancel-meal" class="ghost" type="button">Отмена</button>
-          <button type="submit">Сохранить</button>
-        </div>
-      </form>
-    </dialog>
-  </main>
-
-  <script nonce="__CSP_NONCE__">
-    (() => {
-      "use strict";
-      const tg = window.Telegram && window.Telegram.WebApp;
-      if (tg) { tg.ready(); tg.expand(); }
-      const initData = tg ? tg.initData : "";
-      const state = { clientId: "", mode: "day", meals: [] };
-      const q = (id) => document.getElementById(id);
-      const status = q("status");
-      q("date").value = new Date().toISOString().slice(0, 10);
-
-      function setStatus(message, error = false) {
-        status.textContent = message || "";
-        status.classList.toggle("error", error);
-      }
-      function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
-      function node(tag, text, className) {
-        const item = document.createElement(tag);
-        if (text !== undefined && text !== null) item.textContent = String(text);
-        if (className) item.className = className;
-        return item;
-      }
-      function number(value) {
-        const parsed = Number(value);
-        return Number.isFinite(parsed) ? parsed.toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "0";
-      }
-      function value(source, ...keys) {
-        for (const key of keys) if (source && source[key] !== undefined && source[key] !== null) return source[key];
-        return 0;
-      }
-      async function api(path, options = {}) {
-        if (!initData) throw new Error("Откройте кабинет тренера из Telegram.");
-        const response = await fetch(path, {
-          ...options,
-          headers: { "X-Telegram-Init-Data": initData, ...(options.body ? { "Content-Type": "application/json" } : {}) }
-        });
-        const data = await response.json().catch(() => ({ error: "Некорректный ответ сервера" }));
-        if (!response.ok) {
-          const messages = {
-            400: "Проверьте дату, порцию и значения КБЖУ.",
-            401: "Откройте кабинет заново из бота.",
-            403: "Нет доступа к этому клиенту.",
-            404: "Данные не найдены или клиент больше не привязан.",
-            500: "Не удалось сохранить данные. Попробуйте позже."
-          };
-          throw new Error(messages[response.status] || data.error || "Ошибка запроса");
-        }
-        return data;
-      }
-      function metric(label, current, target, unit) {
-        const box = node("div", null, "metric");
-        box.append(node("span", label));
-        box.append(node("strong", `${number(current)}${target ? ` / ${number(target)}` : ""} ${unit}`));
-        return box;
-      }
-      function renderSummary(totals = {}, norms = {}, water = 0) {
-        const box = q("summary"); clear(box);
-        box.append(
-          metric("Калории", value(totals, "calories", "total_calories"), value(norms, "calories"), "ккал"),
-          metric("Белки", value(totals, "protein_g", "protein", "total_protein"), value(norms, "protein_g"), "г"),
-          metric("Жиры", value(totals, "fat_g", "fat", "total_fat"), value(norms, "fat_g"), "г"),
-          metric("Углеводы", value(totals, "carbs_g", "carbs", "total_carbs"), value(norms, "carbs_g"), "г"),
-          metric("Вода", water, value(norms, "water_ml"), "мл")
-        );
-      }
-      function putFormValues(form, data, names) {
-        names.forEach((name) => { form.elements[name].value = data && data[name] !== undefined ? data[name] : ""; });
-      }
-      function auditText(meal) {
-        const who = value(meal, "updated_by_name", "updated_by", "edited_by");
-        const when = value(meal, "updated_at", "edited_at");
-        const manuallyEdited = Array.isArray(meal.items) && meal.items.some((item) => Boolean(item.manually_edited));
-        return who || manuallyEdited ? `Изменено: ${who || "тренер"}${when ? `, ${when}` : ""}` : "";
-      }
-      function renderMeals(meals) {
-        state.meals = Array.isArray(meals) ? meals : [];
-        const list = q("meals"); clear(list);
-        if (!state.meals.length) { list.append(node("p", "Нет записей за этот день", "empty")); return; }
-        state.meals.forEach((meal) => {
-          const row = node("article", null, "meal");
-          const copy = node("div");
-          copy.append(node("h3", value(meal, "meal_type", "type") || "Приём пищи"));
-          const totals = (meal.items || []).reduce((sum, item) => {
-            sum.calories += Number(item.calories || 0); sum.protein_g += Number(item.protein_g || 0);
-            sum.fat_g += Number(item.fat_g || 0); sum.carbs_g += Number(item.carbs_g || 0); return sum;
-          }, { calories: 0, protein_g: 0, fat_g: 0, carbs_g: 0 });
-          copy.append(node("p", `${number(totals.calories)} ккал · Б ${number(totals.protein_g)} · Ж ${number(totals.fat_g)} · У ${number(totals.carbs_g)}`));
-          const names = Array.isArray(meal.items) ? meal.items.map((item) => item.name).filter(Boolean).join(", ") : "";
-          if (names) copy.append(node("p", names));
-          const audit = auditText(meal); if (audit) copy.append(node("p", audit, "audit"));
-          (meal.comments || []).forEach((comment) => {
-            const line = `Комментарий: ${comment.text}${comment.created_at ? `, ${comment.created_at}` : ""}`;
-            copy.append(node("p", line, "audit"));
-          });
-          const edit = node("button", "Изменить", "secondary"); edit.type = "button";
-          edit.addEventListener("click", () => openMeal(meal));
-          row.append(copy, edit); list.append(row);
-        });
-      }
-      function renderNorms(norms) {
-        putFormValues(q("norms-form"), norms || {}, ["calories", "protein_g", "fat_g", "carbs_g", "water_ml"]);
-        q("norms-form").elements.effective_from.value = q("date").value;
-      }
-      function renderWeek(data) {
-        renderSummary(data.averages || {}, {}, value(data.averages || {}, "water_ml"));
-        const body = q("week-days"); clear(body);
-        const days = Array.isArray(data.days) ? data.days : [];
-        if (!days.length) {
-          const row = document.createElement("tr"), cell = node("td", "Нет записей за неделю");
-          cell.colSpan = 6; row.append(cell); body.append(row); return;
-        }
-        days.forEach((day) => {
-          const totals = day.totals || day;
-          const row = document.createElement("tr");
-          [value(day, "date", "local_date"), value(totals, "calories", "total_calories"), value(totals, "protein_g", "total_protein"), value(totals, "fat_g", "total_fat"), value(totals, "carbs_g", "total_carbs"), value(day, "water_ml")].forEach((item, index) => row.append(node("td", index ? number(item) : item)));
-          body.append(row);
-        });
-      }
-      function monday(raw) {
-        const day = new Date(`${raw}T12:00:00`), offset = (day.getDay() + 6) % 7;
-        day.setDate(day.getDate() - offset); return day.toISOString().slice(0, 10);
-      }
-      async function loadClients() {
-        setStatus("Загружаем клиентов...");
-        const data = await api("/api/clients");
-        const select = q("client"), current = select.value; clear(select);
-        const placeholder = node("option", "Выберите клиента"); placeholder.value = ""; select.append(placeholder);
-        (data.clients || []).forEach((client) => {
-          const option = node("option", client.display_name || client.name || `Клиент ${client.id}`);
-          option.value = String(client.id); select.append(option);
-        });
-        if (current && [...select.options].some((option) => option.value === current)) select.value = current;
-        setStatus((data.clients || []).length ? "" : "Нет привязанных клиентов");
-      }
-      async function loadView() {
-        state.clientId = q("client").value;
-        if (!state.clientId) { q("content").classList.add("hidden"); return; }
-        setStatus("Загружаем данные...");
-        if (state.mode === "day") {
-          const data = await api(`/api/clients/${encodeURIComponent(state.clientId)}/day?date=${encodeURIComponent(q("date").value)}`);
-          renderSummary(data.totals || {}, data.norms || {}, value(data, "water_ml"));
-          renderMeals(data.meals); renderNorms(data.norms);
-        } else {
-          const data = await api(`/api/clients/${encodeURIComponent(state.clientId)}/week?start=${encodeURIComponent(monday(q("date").value))}`);
-          renderWeek(data);
-        }
-        q("content").classList.remove("hidden"); setStatus("");
-      }
-      function setMode(mode) {
-        state.mode = mode;
-        q("day-view").classList.toggle("hidden", mode !== "day");
-        q("week-view").classList.toggle("hidden", mode !== "week");
-        q("day-tab").setAttribute("aria-pressed", String(mode === "day"));
-        q("week-tab").setAttribute("aria-pressed", String(mode === "week"));
-        loadView().catch((error) => setStatus(error.message, true));
-      }
-      function openMeal(meal) {
-        const form = q("meal-form");
-        putFormValues(form, meal, ["meal_id", "meal_type", "note"]);
-        form.elements.meal_id.value = meal.id;
-        form.elements.comment.value = "";
-        const itemBox = q("meal-items"); clear(itemBox);
-        (meal.items || []).forEach((item) => itemBox.append(itemEditor(item)));
-        q("meal-dialog").showModal();
-      }
-      function itemEditor(item) {
-        const box = node("section", null, "card"); box.dataset.itemRow = "1";
-        const fields = [
-          ["Название", "name", "text", "1"], ["Масса, г", "weight_g", "number", "0.1"],
-          ["Порция словами", "portion_text", "text", "1"], ["Ккал", "calories", "number", "0.1"],
-          ["Белки, г", "protein_g", "number", "0.1"], ["Жиры, г", "fat_g", "number", "0.1"],
-          ["Углеводы, г", "carbs_g", "number", "0.1"]
-        ];
-        const grid = node("div", null, "form-grid");
-        fields.forEach(([labelText, name, type, step]) => {
-          const label = node("label", labelText), input = document.createElement("input");
-          input.name = name; input.type = type; if (type === "number") { input.min = "0"; input.step = step; }
-          input.value = item[name] !== undefined && item[name] !== null ? item[name] : "";
-          label.append(input); grid.append(label);
-        });
-        const approxLabel = node("label", "Приблизительная оценка"), approx = document.createElement("input");
-        approx.type = "checkbox"; approx.name = "approximate"; approx.checked = item.approximate !== false;
-        approxLabel.append(approx); grid.append(approxLabel); box.append(grid); return box;
-      }
-      function numericPayload(form, names) {
-        const result = {};
-        names.forEach((name) => { if (form.elements[name].value !== "") result[name] = Number(form.elements[name].value); });
-        return result;
-      }
-      function itemPayload(row) {
-        const read = (name) => row.querySelector(`[name="${name}"]`).value;
-        const result = {
-          name: read("name"), portion_text: read("portion_text"),
-          calories: Number(read("calories") || 0), protein_g: Number(read("protein_g") || 0),
-          fat_g: Number(read("fat_g") || 0), carbs_g: Number(read("carbs_g") || 0),
-          approximate: row.querySelector('[name="approximate"]').checked
-        };
-        const weight = read("weight_g"); result.weight_g = weight === "" ? null : Number(weight); return result;
-      }
-
-      q("client").addEventListener("change", () => loadView().catch((error) => setStatus(error.message, true)));
-      q("date").addEventListener("change", () => loadView().catch((error) => setStatus(error.message, true)));
-      q("day-tab").addEventListener("click", () => setMode("day"));
-      q("week-tab").addEventListener("click", () => setMode("week"));
-      q("refresh").addEventListener("click", () => loadClients().then(loadView).catch((error) => setStatus(error.message, true)));
-      q("cancel-meal").addEventListener("click", () => q("meal-dialog").close());
-      q("norms-form").addEventListener("submit", async (event) => {
-        event.preventDefault(); const form = event.currentTarget;
-        const payload = numericPayload(form, ["calories", "protein_g", "fat_g", "carbs_g", "water_ml"]);
-        payload.effective_from = form.elements.effective_from.value;
-        try { await api(`/api/clients/${encodeURIComponent(state.clientId)}/norms`, { method: "POST", body: JSON.stringify(payload) }); await loadView(); setStatus("Нормы сохранены"); }
-        catch (error) { setStatus(error.message, true); }
-      });
-      q("meal-form").addEventListener("submit", async (event) => {
-        event.preventDefault(); const form = event.currentTarget, mealId = form.elements.meal_id.value;
-        const payload = { meal_type: form.elements.meal_type.value, note: form.elements.note.value };
-        payload.items = [...q("meal-items").querySelectorAll("[data-item-row]")].map(itemPayload);
-        try {
-          await api(`/api/meals/${encodeURIComponent(mealId)}`, { method: "PATCH", body: JSON.stringify(payload) });
-          const comment = form.elements.comment.value.trim();
-          if (comment) await api(`/api/meals/${encodeURIComponent(mealId)}/comments`, { method: "POST", body: JSON.stringify({ text: comment }) });
-          q("meal-dialog").close(); await loadView(); setStatus("Приём обновлён");
-        } catch (error) { setStatus(error.message, true); }
-      });
-
-      loadClients().catch((error) => setStatus(error.message, true));
-    })();
-  </script>
-</body>
-</html>
+<body><main class="shell">
+<header class="topbar"><div><p class="eyebrow">Natrium</p><h1>Дневник питания</h1></div><div class="top-actions"><div id="modes" class="mode-switch" role="tablist" aria-label="Режим кабинета" hidden><button id="self-mode" type="button" role="tab" aria-selected="true">Мой дневник</button><button id="trainer-mode" type="button" role="tab" aria-selected="false">Кабинет тренера</button></div><button id="refresh" class="ghost" type="button">Обновить</button></div></header>
+<p id="status" class="status" role="status" aria-live="polite"></p>
+<div class="app"><nav class="nav" aria-label="Разделы"><button data-view="today" aria-selected="true">Сегодня</button><button data-view="dynamics" data-cap="summary" aria-selected="false">Динамика</button><button data-view="plan" data-cap="norms" aria-selected="false">План</button><button data-view="profile" data-cap="profile" aria-selected="false">Профиль</button></nav><section>
+<div id="trainer-layout" class="trainer" hidden><aside id="clients-panel" class="card clients" data-selected="false"><div class="head"><div><h2>Клиенты</h2><p class="help">Активность и дневники</p></div></div><label>Поиск<input id="client-search" type="search" placeholder="Имя клиента" autocomplete="off"></label><div id="client-list" class="client-list"></div></aside><div id="trainer-detail" class="detail" data-selected="false"><button id="back-clients" class="ghost" type="button" hidden>← К клиентам</button><div id="trainer-host"></div></div></div>
+<div id="self-host"></div></section></div>
+<nav class="bottom" aria-label="Разделы"><button data-view="today" aria-selected="true">Сегодня</button><button data-view="dynamics" data-cap="summary" aria-selected="false">Динамика</button><button data-view="plan" data-cap="norms" aria-selected="false">План</button><button data-view="profile" data-cap="profile" aria-selected="false">Профиль</button></nav>
+<dialog id="dialog" aria-labelledby="dialog-title"><form id="dialog-form"><h2 id="dialog-title"></h2><p id="dialog-status" class="status" role="status" aria-live="polite"></p><div id="dialog-fields" class="form-grid"></div><div class="actions"><button id="dialog-cancel" class="ghost" type="button">Отмена</button><button type="submit">Сохранить</button></div></form></dialog>
+</main><script nonce="__CSP_NONCE__">
+(()=>{"use strict";
+const tg=window.Telegram&&window.Telegram.WebApp;if(tg){tg.ready();tg.expand()}const initialInitData=tg?tg.initData:"";const q=id=>document.getElementById(id),qa=(s,r=document)=>[...r.querySelectorAll(s)];
+const state={session:null,useInitData:Boolean(initialInitData),mode:"self",view:"today",clientId:"",date:new Date().toISOString().slice(0,10),clients:[],lastFocus:null,period:"week",custom:null,request:0};
+const routes={session:"/api/session",exchange:"/api/auth/browser/exchange",clients:"/api/clients",selfDay:"/api/me/day?date={date}",trainerDay:"/api/clients/{client}/day?date={date}",selfSummary:"/api/me/summary?from={from}&to={to}&bucket=day",trainerSummary:"/api/clients/{client}/summary?from={from}&to={to}&bucket=day",profile:"/api/me/profile",selfReminders:"/api/me/reminders",trainerReminders:"/api/trainer/reminders",selfNorms:"/api/me/norms?on={date}",plan:"/api/clients/{client}/norms-plan",norms:"/api/clients/{client}/norms",xlsxPreview:"/api/clients/{client}/norms-plan/xlsx/preview",xlsxCommit:"/api/clients/{client}/norms-plan/xlsx/commit",template:"/api/norms-plan/template.xlsx",chat:"/api/clients/{client}/chat",draft:"/api/me/meals/drafts",selfMeal:"/api/me/meals/{meal}",confirm:"/api/me/meals/{meal}/confirm",cancelMeal:"/api/me/meals/{meal}/cancel",referenceSearch:"/api/reference/foods",referenceCalculate:"/api/reference/calculate",water:"/api/me/water",waterEntry:"/api/me/water/{entry}",weight:"/api/me/weight",weightEntry:"/api/me/weight/{entry}",meal:"/api/meals/{meal}",comment:"/api/meals/{meal}/comments",photo:"/api/meals/{meal}/photo",export:"/api/export"};
+function path(name,v={}){let s=routes[name];Object.entries(v).forEach(([k,x])=>s=s.replaceAll(`{${k}}`,encodeURIComponent(x??"")));return s}function caps(){return state.session?.capabilities||{}}function can(n){return caps()[n]===true}function val(o,...ks){for(const k of ks)if(o&&o[k]!==undefined&&o[k]!==null)return o[k];return null}function el(t,x,c){const n=document.createElement(t);if(x!==undefined&&x!==null)n.textContent=String(x);if(c)n.className=c;return n}function clear(n){while(n.firstChild)n.removeChild(n.firstChild)}function num(x,d=1){if(x===null||x===undefined||x==="")return "Нет данных";const n=Number(x);return Number.isFinite(n)?n.toLocaleString("ru-RU",{maximumFractionDigits:d}):"Нет данных"}function dateParts(raw){const [y,m,d]=raw.split("-").map(Number);return new Date(Date.UTC(y,m-1,d))}function shift(raw,n){const d=dateParts(raw);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}function monday(raw){const d=dateParts(raw);return shift(raw,-((d.getUTCDay()+6)%7))}function idempotency(){return crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`}
+function status(text,error=false,retry=null){const b=q("status");clear(b);b.classList.toggle("error",error);b.append(document.createTextNode(text||""));if(retry){const x=el("button","Повторить","secondary");x.type="button";x.onclick=retry;b.append(x)}}
+async function api(url,opt={}){const h={...(state.useInitData?{"X-Telegram-Init-Data":initialInitData}:{}),...(opt.headers||{})};if(state.session?.csrf_token&&opt.method&&opt.method!=="GET")h["X-CSRF-Token"]=state.session.csrf_token;if(opt.json){h["Content-Type"]="application/json";opt.body=JSON.stringify(opt.json)}if(opt.method&&opt.method!=="GET")h["Idempotency-Key"]=opt.idempotency||idempotency();const r=await fetch(url,{...opt,headers:h,credentials:"same-origin"});if(opt.blob&&r.ok)return r.blob();const body=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(body.error?.message||({401:"Сессия закончилась. Откройте кабинет заново из бота.",403:"Нет доступа.",404:"Данные не найдены.",409:"Данные уже изменились. Обновите страницу.",422:"Проверьте заполненные поля.",500:"Сервис временно недоступен."}[r.status])||"Не удалось выполнить запрос.");e.status=r.status;e.fields=body.error?.fields||{};throw e}return body.data}
+async function browserExchange(){if(initialInitData)return;const p=new URLSearchParams(location.hash.slice(1)),token=p.get("token");if(!token)return;await api(path("exchange"),{method:"POST",json:{token}});history.replaceState(null,"",location.pathname+location.search)}
+async function session(){await browserExchange();state.session=await api(path("session"));state.useInitData=false;state.date=state.session.today||state.date;const roles=state.session.roles||[];state.mode=roles.includes("self")?"self":"trainer";q("modes").hidden=roles.length<2;q("self-mode").hidden=!roles.includes("self");q("trainer-mode").hidden=!roles.includes("trainer");theme();applyCaps();mode(state.mode)}
+function theme(){document.documentElement.dataset.telegram=String(Boolean(tg))}
+function have(cap){const section={dynamics:"summary",plan:"norms"}[cap]||cap,map={summary:state.mode==="trainer"?"trainer_dashboard":"self_dashboard",norms:state.mode==="trainer"?"manage_norms":"self_dashboard",profile:state.mode==="self"?"self_dashboard":"trainer_reminders"};return can(map[section])}function applyCaps(){qa("[data-cap]").forEach(x=>x.hidden=!have(x.dataset.cap));if(state.view!=="today"&&!have(state.view))state.view="today"}
+function mode(m){state.mode=m;state.clientId="";q("self-mode").setAttribute("aria-selected",String(m==="self"));q("trainer-mode").setAttribute("aria-selected",String(m==="trainer"));q("trainer-layout").hidden=m!=="trainer";q("self-host").hidden=m!=="self";applyCaps();if(m==="trainer")loadClients().then(render);else render()}
+function view(v){state.view=v;qa("[data-view]").forEach(x=>x.setAttribute("aria-selected",String(x.dataset.view===v)));render()}function host(){return state.mode==="trainer"?q("trainer-host"):q("self-host")}function loading(){const h=host();clear(h);const s=el("div",null,"stack");s.append(el("div",null,"skeleton"),el("div",null,"skeleton"));h.append(s)}
+async function loadClients(){const b=q("client-list");clear(b);b.append(el("div",null,"skeleton"));try{const d=await api("/api/clients");state.clients=d.clients||d.items||[];clientList();status("")}catch(e){clear(b);b.append(el("p",e.message,"empty"));status(e.message,true,loadClients)}}
+function clientList(){const b=q("client-list"),term=q("client-search").value.trim().toLowerCase();clear(b);const a=state.clients.filter(c=>(c.display_name||"").toLowerCase().includes(term));if(!a.length){b.append(el("p",term?"Ничего не найдено":"Нет привязанных клиентов","empty"));return}a.forEach(c=>{const x=el("button",null,"client");x.type="button";x.setAttribute("aria-current",String(String(c.id)===state.clientId));x.append(el("strong",c.display_name||"Клиент"));const activity=c.last_activity_at||c.last_meal_at;if(activity)x.append(el("small",`Активность: ${readableMoment(activity,c.timezone)}`));if(c.norms_status)x.append(el("small",`Нормы: ${{set:"заданы",partial:"заданы частично",missing:"не заданы"}[c.norms_status]||c.norms_status}`));x.onclick=()=>{state.clientId=String(c.id);state.date=c.local_today||c.today?.date||state.session.today;q("clients-panel").dataset.selected="true";q("trainer-detail").dataset.selected="true";q("back-clients").hidden=false;clientList();render()};b.append(x)})}
+function selectedClient(){return state.clients.find(x=>String(x.id)===state.clientId)}
+function activeTimezone(){return selectedClient()?.timezone||state.session?.user?.timezone||"UTC"}function readableDate(raw){return new Intl.DateTimeFormat("ru-RU",{day:"numeric",month:"long",year:"numeric",timeZone:"UTC"}).format(dateParts(raw))}function readableMoment(raw,tz=activeTimezone()){const d=new Date(raw);return Number.isNaN(d.valueOf())?String(raw):new Intl.DateTimeFormat("ru-RU",{day:"numeric",month:"long",hour:"2-digit",minute:"2-digit",timeZone:tz}).format(d)}function toolbar(title){const b=el("div",null,"toolbar"),h=el("div");h.append(el("h2",title),el("p",readableDate(state.date),"help"));const n=el("div",null,"date-nav"),p=el("button","←","ghost"),d=document.createElement("input"),z=el("button","→","ghost");p.type=z.type="button";d.type="date";d.value=state.date;d.setAttribute("aria-label","Дата");p.onclick=()=>{state.date=shift(state.date,-1);render()};z.onclick=()=>{state.date=shift(state.date,1);render()};d.onchange=()=>{if(d.value){state.date=d.value;render()}};n.append(p,d,z);b.append(h,n);return b}
+function metric(l,x,t,u){const b=el("div",null,"metric"),missing=x===null||x===undefined;b.append(el("span",l),el("strong",missing?"Нет записей":`${num(x)} ${u}`));if(t!==null)b.append(el("small",`Цель: ${num(t)} ${u}`));if(Number(t)>0&&!missing&&Number.isFinite(Number(x))){const m=document.createElement("progress");m.className="meter";m.max=Number(t);m.value=Math.min(Number(t),Number(x));m.setAttribute("aria-label",`${l}: ${num(x)} из ${num(t)} ${u}`);b.append(m)}return b}function summary(d){const t=d.totals||{},n=d.norms||{},b=el("section",null,"summary"),water=val(t,"water_ml")??val(d,"water_ml");b.append(metric("Калории",t.calories,n.calories??null,"ккал"),metric("Белки",t.protein_g,n.protein_g??null,"г"),metric("Жиры",t.fat_g,n.fat_g??null,"г"),metric("Углеводы",t.carbs_g,n.carbs_g??null,"г"),metric("Вода",water,n.water_ml??null,"мл"));return b}
+function source(i){if(i.calculation_method==="reference")return["Справочник","ok"];if(i.calculation_method==="manual")return["Вручную","ok"];return i.approximate!==false?["Приблизительно","warn"]:["Подтверждено","ok"]}
+function meals(d){const c=el("section",null,"card");c.append(el("h2","Приёмы пищи"),el("p","В итог входят только подтверждённые записи.","help"));if(!d.meals?.length){c.append(el("p","За этот день нет записей.","empty"));return c}d.meals.forEach(m=>{const row=el("article",null,"meal"),body=el("div",null,"meal-body"),text=el("div"),photo=m.has_photo&&can("meal_photo");if(photo){const img=document.createElement("img");img.className="meal-photo";img.alt="Фото приёма пищи";body.append(img);attachMealPhoto(img,body,m.id)}else body.classList.add("no-photo");const mealType={breakfast:"Завтрак",lunch:"Обед",dinner:"Ужин",snack:"Перекус",other:"Другое"}[m.meal_type]||m.meal_type||"Приём пищи";text.append(el("h3",mealType),el("p",readableMoment(m.eaten_at),"help"));const badges=el("div",null,"badges"),first=m.items?.[0]||{},s=source(first);badges.append(el("span",m.status==="confirmed"?"Подтверждено":m.status||"Черновик",m.status==="confirmed"?"badge ok":"badge warn"),el("span",s[0],`badge ${s[1]}`));text.append(badges);const names=(m.items||[]).map(i=>[i.name,i.weight_g!==null&&i.weight_g!==undefined?`${num(i.weight_g)} г`:i.portion_text].filter(Boolean).join(", ")).filter(Boolean).join("; ");if(names)text.append(el("p",names,"muted"));if(m.hunger_level!==null&&m.hunger_level!==undefined)text.append(el("span",`Голод до еды: ${m.hunger_level}/10`,"badge"));if(m.mood)text.append(el("span",`Самочувствие: ${{great:"отличное",good:"хорошее",neutral:"нейтральное",low:"пониженное",stressed:"стресс"}[m.mood]||m.mood}`,"badge"));const totals=(m.items||[]).reduce((sum,i)=>{["calories","protein_g","fat_g","carbs_g"].forEach(k=>sum[k]+=Number(i[k]||0));return sum},{calories:0,protein_g:0,fat_g:0,carbs_g:0});text.append(el("p",`${num(totals.calories)} ккал · Б ${num(totals.protein_g)} · Ж ${num(totals.fat_g)} · У ${num(totals.carbs_g)}`));if(m.note)text.append(el("p",m.note,"muted"));(m.comments||[]).forEach(x=>text.append(el("p",`Комментарий: ${x.text}`,"audit")));body.append(text);const acts=el("div",null,"inline");if((state.mode==="trainer"&&can("manage_clients"))||(state.mode==="self"&&can("edit_own_diary"))){const e=el("button","Изменить","secondary");e.type="button";e.onclick=()=>mealDialog(m);acts.append(e)}if(state.mode==="self"&&can("edit_own_diary")){const cancel=el("button","Отменить","ghost");cancel.type="button";cancel.onclick=()=>cancelMealDialog(m);acts.append(cancel)}if(state.mode==="trainer"&&can("manage_clients")){const k=el("button","Комментарий","ghost");k.type="button";k.onclick=()=>commentDialog(m);acts.append(k)}row.append(body,acts);c.append(row)});return c}
+async function attachMealPhoto(img,body,mealId){try{const blob=await api(path("photo",{meal:mealId}),{blob:true}),url=URL.createObjectURL(blob);img.src=url;img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>{URL.revokeObjectURL(url);img.remove();body.classList.add("no-photo")}}catch(_){img.remove();body.classList.add("no-photo")}}
+async function today(){if(state.mode==="trainer"&&!state.clientId){clear(host());host().append(el("p","Выберите клиента.","empty"));return}const request=++state.request;loading();const u=state.mode==="self"?path("selfDay",{date:state.date}):path("trainerDay",{client:state.clientId,date:state.date});try{const d=await api(u),b=el("div",null,"stack"),client=selectedClient(),name=state.mode==="self"?(state.date===state.session.today?"Сегодня":"Дневник"):client?.display_name||"Дневник клиента";b.append(toolbar(name),summary(d));const quick=el("div",null,"quick");if(state.mode==="self"&&can("edit_own_diary")){const meal=el("button","Добавить приём"),w=el("button","Добавить воду","secondary"),v=el("button","Записать вес","secondary");meal.type=w.type=v.type="button";meal.onclick=startMealWizard;w.onclick=waterDialog;v.onclick=weightDialog;quick.append(meal,w,v)}if(state.mode==="trainer"&&can("open_client_chat")){if(client?.can_open_chat){const chat=el("button","Открыть личный чат","ghost");chat.type="button";chat.onclick=openClientChat;quick.append(chat)}else quick.append(el("span","Личный чат станет доступен, когда клиент задаст публичное имя Telegram.","help"))}if(quick.childElementCount)b.append(quick);if(d.weight_kg!==null&&d.weight_kg!==undefined)b.append(el("p",`Вес: ${num(d.weight_kg,2)} кг`,"muted"));b.append(meals(d));if(state.mode==="self"&&can("edit_own_diary"))b.append(entryLog(d));if(request!==state.request)return;clear(host());host().append(b);status("")}catch(e){if(request!==state.request)return;clear(host());host().append(el("p",e.message,"empty"));status(e.message,true,today)}}
+function entryLog(d){const c=el("section",null,"card"),list=el("div",null,"stack");c.append(el("h2","История воды и веса"));const entries=[...(d.water_entries||[]).map(x=>({...x,kind:"water"})),...(d.weight_entries||[]).map(x=>({...x,kind:"weight"}))].filter(x=>x.status!=="cancelled");if(!entries.length){c.append(el("p","Отдельных записей за день пока нет.","help"));return c}entries.forEach(x=>{const row=el("div",null,"head"),copy=el("div"),actions=el("div",null,"inline"),label=x.kind==="water"?`${num(x.amount_ml,0)} мл воды`:`${num(x.weight_kg,2)} кг`;copy.append(el("strong",label),el("p",readableMoment(x.kind==="water"?x.logged_at:x.measured_at,x.timezone),"help"));if(x.note)copy.append(el("p",x.note,"muted"));const edit=el("button","Исправить","secondary"),cancel=el("button","Отменить запись","ghost");edit.type=cancel.type="button";edit.onclick=()=>entryDialog(x);cancel.onclick=()=>cancelEntryDialog(x);actions.append(edit,cancel);row.append(copy,actions);list.append(row)});c.append(list);return c}
+function range(p){if(p==="day")return{from:state.date,to:state.date};if(p==="week"){const from=monday(state.date);return{from,to:shift(from,6)}}if(p==="month"){const [y,m]=state.date.split("-").map(Number),from=`${state.date.slice(0,7)}-01`,d=new Date(Date.UTC(y,m,0));return{from,to:d.toISOString().slice(0,10)}}return state.custom||{from:state.date,to:state.date}}
+function periodButtons(){const b=el("div",null,"periods");[["day","День"],["week","Неделя"],["month","Месяц"],["range","Диапазон"]].forEach(([v,l])=>{const x=el("button",l,v===state.period?"":"secondary");x.type="button";x.setAttribute("aria-pressed",String(v===state.period));x.onclick=()=>{state.period=v;if(v==="range")customDialog();else dynamics()};b.append(x)});return b}
+function present(x){return x!==null&&x!==undefined&&Number.isFinite(Number(x))}function chart(title,series,keys,labels,unit){const c=el("section",null,"card chart");c.append(el("h3",title));const values=series.flatMap(d=>keys.flatMap(k=>present(d[k])?[Number(d[k])]:[]));if(!values.length){c.append(el("p","Недостаточно данных.","empty"));return c}const ns="http://www.w3.org/2000/svg",svg=document.createElementNS(ns,"svg"),W=600,H=160,P=18,rawMin=Math.min(...values),rawMax=Math.max(...values),weight=unit==="кг",padding=weight?Math.max(.5,(rawMax-rawMin)*.12):0,min=weight?Math.max(0,rawMin-padding):0,max=weight?rawMax+padding:Math.max(1,rawMax),span=Math.max(.01,max-min),xy=(value,index)=>[P+(series.length===1?.5:index/(series.length-1))*(W-2*P),H-P-(Number(value)-min)/span*(H-2*P)];svg.setAttribute("viewBox",`0 0 ${W} ${H}`);svg.setAttribute("role","img");svg.setAttribute("aria-label",`${title}, от ${num(min,2)} до ${num(max,2)} ${unit}`);[0,.5,1].forEach(y=>{const l=document.createElementNS(ns,"line");l.setAttribute("x1",P);l.setAttribute("x2",W-P);l.setAttribute("y1",P+(H-2*P)*y);l.setAttribute("y2",P+(H-2*P)*y);l.setAttribute("class","gridline");svg.append(l)});keys.forEach((k,j)=>{let segment=[];const cls=j===1?" alt":j===2?" third":"",flush=()=>{if(segment.length>1){const p=document.createElementNS(ns,"polyline");p.setAttribute("points",segment.join(" "));p.setAttribute("class",`line${cls}`);svg.append(p)}segment=[]};series.forEach((d,index)=>{if(!present(d[k])){flush();return}const [x,y]=xy(d[k],index);segment.push(`${x},${y}`);const dot=document.createElementNS(ns,"circle"),tip=document.createElementNS(ns,"title");dot.setAttribute("cx",x);dot.setAttribute("cy",y);dot.setAttribute("r","4");dot.setAttribute("class",`point${cls}`);tip.textContent=`${d.date}: ${num(d[k],2)} ${unit}`;dot.append(tip);svg.append(dot)});flush()});c.append(svg);const scale=el("div",null,"head");scale.append(el("small",readableDate(series[0]?.date||state.date),"help"),el("small",`${num(min,2)} - ${num(max,2)} ${unit}`,"help"),el("small",readableDate(series.at(-1)?.date||state.date),"help"));c.append(scale);const legend=el("div",null,"legend");labels.forEach((x,i)=>{const s=el("span"),m=el("i",null,i===1?"alt":i===2?"third":"");s.append(m,document.createTextNode(x));legend.append(s)});c.append(legend);return c}
+async function dynamics(){if(state.mode==="trainer"&&!state.clientId)return today();const request=++state.request;loading();const r=range(state.period),u=state.mode==="self"?path("selfSummary",r):path("trainerSummary",{client:state.clientId,...r});try{const d=await api(u),series=d.series||[],plot=series.map(x=>({...x,calorie_norm:x.norms?.calories??null,water_norm:x.norms?.water_ml??null})),b=el("div",null,"stack"),h=el("div",null,"head"),copy=el("div");copy.append(el("h2","Динамика"),el("p",`${readableDate(r.from)} - ${readableDate(r.to)}`,"help"));h.append(copy,periodButtons());b.append(h,chart("Калории",plot,["calories","calorie_norm"],["Факт","План"],"ккал"));const cg=el("div",null,"charts");cg.append(chart("Белки, жиры и углеводы",series,["protein_g","fat_g","carbs_g"],["Белки","Жиры","Углеводы"],"г"),chart("Вода",plot,["water_ml","water_norm"],["Факт","План"],"мл"),chart("Вес",series,["weight_kg"],["Вес"],"кг"));b.append(cg);if(d.averages){b.append(el("h3","Среднее по дням с записями"),summary({totals:d.averages,norms:{}}))}if(d.coverage){const food=d.coverage.calories,water=d.coverage.water_ml;b.append(el("p",`Питание: ${food?.logged_days??0} из ${food?.period_days??series.length} дней · Вода: ${water?.logged_days??0} из ${water?.period_days??series.length} дней`,"muted"))}b.append(periodTable(series));if(d.top_foods?.length){const top=el("section",null,"card"),ol=document.createElement("ol");top.append(el("h3","Частые продукты"));d.top_foods.forEach(f=>ol.append(el("li",`${f.display_name||f.name} · Записей: ${num(f.entries??f.count,0)}`)));top.append(ol);b.append(top)}const ex=el("div",null,"quick");[["export_csv","csv"],["export_xlsx","xlsx"],["print_view","print"]].forEach(([cap,fmt])=>{if(can(cap)){const x=el("button",fmt==="print"?"Версия для печати":`Экспорт ${fmt.toUpperCase()}`,"ghost");x.type="button";x.onclick=()=>download(fmt,r);ex.append(x)}});if(ex.childElementCount)b.append(ex);if(request!==state.request)return;clear(host());host().append(b);status("")}catch(e){if(request!==state.request)return;clear(host());host().append(el("p",e.message,"empty"));status(e.message,true,dynamics)}}
+function periodTable(series){const c=el("section",null,"card"),w=el("div",null,"table-wrap"),t=document.createElement("table"),head=document.createElement("thead"),hr=document.createElement("tr"),body=document.createElement("tbody");["Дата","Ккал","Б, г","Ж, г","У, г","Вода, мл","Вес, кг"].forEach(x=>hr.append(el("th",x)));head.append(hr);series.forEach(d=>{const r=document.createElement("tr");[readableDate(d.date),num(d.calories),num(d.protein_g),num(d.fat_g),num(d.carbs_g),num(d.water_ml,0),num(d.weight_kg,2)].forEach(x=>r.append(el("td",x)));body.append(r)});t.append(head,body);w.append(t);c.append(el("h3","Таблица периода"),w);return c}
+async function plan(){if(state.mode==="trainer"&&!state.clientId)return today();const request=++state.request;loading();const u=state.mode==="self"?path("selfNorms",{date:state.date}):path("plan",{client:state.clientId});try{const d=await api(u),b=el("div",null,"stack"),c=el("section",null,"card");c.append(el("h2","План норм"),el("p","Каждая строка действует с указанной даты до следующей.","help"));const rows=Array.isArray(d)?d:Array.isArray(d.rows)?d.rows:Array.isArray(d.norms)?d.norms:d.norms?[d.norms]:d.effective_from?[d]:[];c.append(planTable(rows.filter(Boolean)));b.append(c);if(state.mode==="trainer"&&can("manage_norms")){b.append(normForm(d.current||{}));if(can("xlsx_plan"))b.append(xlsx())}if(request!==state.request)return;clear(host());host().append(b);status("")}catch(e){if(request!==state.request)return;clear(host());host().append(el("p",e.message,"empty"));status(e.message,true,plan)}}
+function planTable(rows){if(!rows.length)return el("p","План пока не задан.","empty");const w=el("div",null,"table-wrap"),t=document.createElement("table"),h=document.createElement("thead"),hr=document.createElement("tr"),b=document.createElement("tbody");["С даты","Ккал/день","Белки, г","Жиры, г","Углеводы, г","Вода, мл"].forEach(x=>hr.append(el("th",x)));h.append(hr);rows.forEach(d=>{const r=document.createElement("tr");[d.effective_from,num(d.calories),num(d.protein_g),num(d.fat_g),num(d.carbs_g),num(d.water_ml)].forEach(x=>r.append(el("td",x)));b.append(r)});t.append(h,b);w.append(t);return w}
+function normForm(d){const c=el("section",null,"card"),f=document.createElement("form"),g=el("div",null,"form-grid");c.append(el("h3","Добавить норму"),el("p","Пустое значение не превращается в ноль.","help"));[["Дата начала","effective_from","date","1"],["Калории, ккал/день","calories","number","1"],["Белки, г/день","protein_g","number","0.1"],["Жиры, г/день","fat_g","number","0.1"],["Углеводы, г/день","carbs_g","number","0.1"],["Вода, мл/день","water_ml","number","1"]].forEach(([l,n,t,s])=>{const z=el("label",l),i=document.createElement("input");i.name=n;i.type=t;i.step=s;if(t==="number")i.min="0";i.value=d[n]??(n==="effective_from"?state.date:"");z.append(i);g.append(z)});const a=el("div",null,"actions"),x=el("button","Сохранить норму");x.type="submit";a.append(x);f.append(g,a);f.onsubmit=saveNorm;c.append(f);return c}
+function xlsx(){const c=el("section",null,"card upload");c.append(el("h3","План из XLSX"),el("p","Файл сначала полностью проверяется и показывается перед атомарной записью.","help"));const i=document.createElement("input");i.type="file";i.accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";i.onchange=()=>{delete c.dataset.key;xlsxPreview(i.files[0],c)};c.append(i);const a=el("button","Скачать шаблон","ghost");a.type="button";a.onclick=downloadTemplate;c.append(a);const p=el("div");p.dataset.preview="1";c.append(p);return c}
+async function profile(){const request=++state.request;loading();try{const b=el("div",null,"stack");if(state.mode==="self"){const d=await api(path("profile")),c=el("section",null,"card"),f=document.createElement("form"),g=el("div",null,"form-grid");f.dataset.version=d.version??"";c.append(el("h2","Профиль"));[["Имя","display_name","text"],["Рост, см","height_cm","number"],["Начальный вес, кг","initial_weight_kg","number"],["Цель","goal","text"],["Часовой пояс","timezone","text"]].forEach(([l,n,t])=>{const z=el("label",l),i=document.createElement("input");i.name=n;i.type=t;if(t==="number"){i.min="0";i.step="0.1"}i.value=d[n]??"";z.append(i);g.append(z)});f.append(g);if(can("edit_own_diary")){const a=el("div",null,"actions"),x=el("button","Сохранить профиль");x.type="submit";a.append(x);f.append(a);f.onsubmit=saveProfile}c.append(f);b.append(c)}const reminderCap=state.mode==="self"?"reminder_preferences":"trainer_reminders";if(can(reminderCap)){const data=await api(path(state.mode==="self"?"selfReminders":"trainerReminders"));b.append(reminderForm(data))}if(request!==state.request)return;clear(host());host().append(b);status("")}catch(e){if(request!==state.request)return;clear(host());host().append(el("p",e.message,"empty"));status(e.message,true,profile)}}
+function checkField(label,name,checked){const l=el("label",null,"check"),i=document.createElement("input");i.type="checkbox";i.name=name;i.checked=Boolean(checked);l.append(i,document.createTextNode(label));return l}function textField(label,name,value,type="text"){const l=el("label",label),i=document.createElement("input");i.name=name;i.type=type;i.value=value??"";l.append(i);return l}
+function reminderForm(d){const c=el("section",null,"card"),f=document.createElement("form"),g=el("div",null,"form-grid");f.dataset.version=d.version??"";c.append(el("h2",state.mode==="self"?"Напоминания":"Сводка тренера"),el("p",`Часовой пояс: ${d.timezone}`,"help"));if(state.mode==="self"){g.append(checkField("Включить напоминания","enabled",d.enabled),checkField("О приёмах пищи","meal_enabled",d.meal?.enabled),textField("Время еды, до 3 значений через запятую","meal_times",d.meal?.times?.join(", ")),checkField("О воде","water_enabled",d.water?.enabled),textField("Время воды через запятую","water_times",d.water?.times?.join(", ")),textField("Интервал воды, минут","water_interval",d.water?.interval_minutes,"number"),textField("Начало интервала","water_start",d.water?.start_local,"time"),textField("Конец интервала","water_end",d.water?.end_local,"time"),textField("Тихие часы с","quiet_start",d.quiet_hours?.start,"time"),textField("Тихие часы до","quiet_end",d.quiet_hours?.end,"time"))}else{g.append(checkField("Включить ежедневную сводку","enabled",d.enabled&&d.daily_digest?.enabled),textField("Время сводки","digest_time",d.daily_digest?.time,"time"),textField("Дней без активности","inactivity_days",d.daily_digest?.inactivity_days,"number"),checkField("Сравнивать калории с планом","compare",d.daily_digest?.calorie_comparison_enabled),textField("Порог превышения плана, %","over_percent",d.daily_digest?.over_plan_percent,"number"))}const a=el("div",null,"actions"),save=el("button","Сохранить настройки");save.type="submit";a.append(save);f.append(g,a);f.onsubmit=saveReminders;c.append(f);return c}
+async function saveReminders(e){e.preventDefault();const f=e.currentTarget,d=data(f);let json;if(state.mode==="self"){const times=x=>String(x||"").split(",").map(v=>v.trim()).filter(Boolean);json={enabled:d.enabled==="on",meal:{enabled:d.meal_enabled==="on",times:times(d.meal_times)},water:{enabled:d.water_enabled==="on",mode:d.water_interval?"interval":"times",times:times(d.water_times),interval_minutes:d.water_interval?Number(d.water_interval):null,start_local:d.water_start||null,end_local:d.water_end||null},quiet_hours:{start:d.quiet_start||null,end:d.quiet_end||null}}}else json={enabled:d.enabled==="on",daily_digest:{enabled:d.enabled==="on",time:d.digest_time,inactivity_days:Number(d.inactivity_days),calorie_comparison_enabled:d.compare==="on",over_plan_percent:Number(d.over_percent)}};try{const saved=await formMutation(f,key=>api(path(state.mode==="self"?"selfReminders":"trainerReminders"),{method:"PATCH",idempotency:key,headers:{"If-Match":f.dataset.version},json}));f.dataset.version=saved.version??f.dataset.version;status("Настройки напоминаний сохранены")}catch(err){status(err.message,true)}}
+function render(){applyCaps();if(state.view==="today")return today();if(state.view==="dynamics")return dynamics();if(state.view==="plan")return plan();if(state.view==="profile")return profile()}
+function openDialog(title,fields,submit){const dialog=q("dialog");if(!dialog.open)state.lastFocus=document.activeElement;q("dialog-title").textContent=title;dialogStatus("");qa(".meal-preview",q("dialog-form")).forEach(x=>x.remove());const b=q("dialog-fields");clear(b);fields.forEach(f=>{const l=el("label",f.label),i=f.options?document.createElement("select"):f.area?document.createElement("textarea"):document.createElement("input");i.name=f.name;if(!f.options&&!f.area)i.type=f.type||"text";if(f.options)f.options.forEach(([value,label])=>{const o=el("option",label);o.value=value;i.append(o)});i.value=f.value??"";if(f.step)i.step=f.step;if(f.min)i.min=f.min;l.append(i);b.append(l)});const submitButton=q("dialog-form").querySelector('button[type="submit"]');submitButton.hidden=false;submitButton.textContent="Сохранить";q("dialog-form").onsubmit=submit;if(!dialog.open)dialog.showModal();b.querySelector("input,textarea,select,button")?.focus()}function dialogStatus(text){const b=q("dialog-status");b.textContent=text||"";b.classList.toggle("error",Boolean(text))}function closeDialog(){const f=q("dialog-form");delete f.dataset.key;delete f.dataset.busy;q("dialog").close();state.lastFocus?.focus()}function data(f){return Object.fromEntries(new FormData(f).entries())}
+async function formMutation(form,request){const button=form.querySelector('button[type="submit"]');if(form.dataset.busy)return null;form.dataset.busy="1";button.disabled=true;form.dataset.key=form.dataset.key||idempotency();try{const result=await request(form.dataset.key);delete form.dataset.key;return result}finally{delete form.dataset.busy;button.disabled=false}}
+function waterDialog(){openDialog("Добавить воду",[...eventFields(),{label:"Объём, мл",name:"amount_ml",type:"number",step:"1",min:"1"}],async e=>{e.preventDefault();try{await formMutation(e.currentTarget,key=>api(path("water"),{method:"POST",idempotency:key,json:{amount_ml:Number(e.currentTarget.amount_ml.value),logged_at:zonedIso(data(e.currentTarget).event_date,data(e.currentTarget).event_time)}}));closeDialog();today();status("Вода добавлена")}catch(x){dialogStatus(x.message)}})}function weightDialog(){openDialog("Записать вес",[...eventFields(),{label:"Вес, кг",name:"weight_kg",type:"number",step:"0.1",min:"0.1"},{label:"Заметка",name:"note",area:true}],async e=>{e.preventDefault();try{await formMutation(e.currentTarget,key=>api(path("weight"),{method:"POST",idempotency:key,json:{weight_kg:Number(e.currentTarget.weight_kg.value),measured_at:zonedIso(data(e.currentTarget).event_date,data(e.currentTarget).event_time),note:e.currentTarget.note.value}}));closeDialog();today();status("Вес сохранён")}catch(x){dialogStatus(x.message)}})}function commentDialog(m){openDialog("Комментарий к приёму",[{label:"Комментарий",name:"text",area:true}],async e=>{e.preventDefault();try{await formMutation(e.currentTarget,key=>api(path("comment",{meal:m.id}),{method:"POST",idempotency:key,json:{text:e.currentTarget.text.value}}));closeDialog();today();status("Комментарий сохранён")}catch(x){dialogStatus(x.message)}})}
+function entryDialog(x){const water=x.kind==="water",stamp=water?x.logged_at:x.measured_at;openDialog(water?"Исправить воду":"Исправить вес",[...eventFields(stamp,x.timezone),{label:water?"Объём, мл":"Вес, кг",name:"value",type:"number",step:water?"1":"0.1",min:water?"1":"0.1",value:water?x.amount_ml:x.weight_kg},...(water?[]:[{label:"Заметка",name:"note",area:true,value:x.note}])],async e=>{e.preventDefault();const d=data(e.currentTarget),time=zonedIso(d.event_date,d.event_time,x.timezone),json=water?{amount_ml:Number(d.value),logged_at:time}:{weight_kg:Number(d.value),measured_at:time,note:d.note};try{await formMutation(e.currentTarget,key=>api(path(water?"waterEntry":"weightEntry",{entry:x.id}),{method:"PATCH",idempotency:key,headers:{"If-Match":String(x.version)},json}));closeDialog();today();status("Запись исправлена")}catch(err){dialogStatus(err.message)}})}
+function cancelEntryDialog(x){const water=x.kind==="water";openDialog("Отменить запись",[],async e=>{e.preventDefault();try{await formMutation(e.currentTarget,key=>api(path(water?"waterEntry":"weightEntry",{entry:x.id}),{method:"DELETE",idempotency:key,headers:{"If-Match":String(x.version)}}));closeDialog();today();status("Запись отменена")}catch(err){dialogStatus(err.message)}});dialogStatus("Запись исчезнет из итогов, но останется в истории изменений.")}
+function cancelMealDialog(m){openDialog("Отменить приём пищи",[],async e=>{e.preventDefault();try{await formMutation(e.currentTarget,key=>api(path("cancelMeal",{meal:m.id}),{method:"POST",idempotency:key,headers:{"If-Match":String(m.version)}}));closeDialog();today();status("Приём отменён")}catch(err){dialogStatus(err.message)}});dialogStatus("Приём исчезнет из дневных итогов. Действие останется в истории изменений.")}
+function localTimeNow(){const parts=new Intl.DateTimeFormat("en-GB",{hour:"2-digit",minute:"2-digit",hourCycle:"h23",timeZone:activeTimezone()}).formatToParts(new Date()),get=t=>parts.find(x=>x.type===t)?.value;return `${get("hour")}:${get("minute")}`}function localEventParts(raw,tz=activeTimezone()){if(!raw)return{date:state.date,time:state.date===state.session.today?localTimeNow():"12:00"};const parts=new Intl.DateTimeFormat("en-CA",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23",timeZone:tz}).formatToParts(new Date(raw)),get=t=>parts.find(x=>x.type===t)?.value;return{date:`${get("year")}-${get("month")}-${get("day")}`,time:`${get("hour")}:${get("minute")}`}}function eventFields(raw=null,tz=activeTimezone()){const v=localEventParts(raw,tz);return[{label:"Дата",name:"event_date",type:"date",value:v.date},{label:"Время",name:"event_time",type:"time",value:v.time}]}function zonedIso(day,time,tz=activeTimezone()){const guess=new Date(`${day}T${time}:00Z`),parts=new Intl.DateTimeFormat("en-CA",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23",timeZone:tz}).formatToParts(guess),get=t=>Number(parts.find(x=>x.type===t).value),shown=Date.UTC(get("year"),get("month")-1,get("day"),get("hour"),get("minute"),get("second")),offset=shown-guess.valueOf();return new Date(guess.valueOf()-offset).toISOString()}function mealContext(){return[...eventFields(),{label:"Тип приёма",name:"meal_type",value:"other",options:[["breakfast","Завтрак"],["lunch","Обед"],["dinner","Ужин"],["snack","Перекус"],["other","Другое"]]},{label:"Заметка",name:"note",area:true},{label:"Голод до еды, 1-10",name:"hunger_level",type:"number",min:"1",step:"1"},{label:"Самочувствие",name:"mood",options:[["","Не указано"],["great","Отличное"],["good","Хорошее"],["neutral","Нейтральное"],["low","Пониженное"],["stressed","Стресс"]]}]}
+function startMealWizard(){openDialog("Добавить приём пищи",[],e=>e.preventDefault());const b=q("dialog-fields"),manual=el("button","Ввести КБЖУ вручную","secondary"),reference=el("button","Найти продукт в справочнике","secondary"),bot=el("a","Открыть бота","secondary");manual.type=reference.type="button";manual.onclick=manualMealStep;reference.onclick=referenceSearchStep;bot.href="https://t.me/natrium_smm_bot";bot.target="_blank";bot.rel="noopener noreferrer";b.append(manual,reference,el("p","Фото и описание с оценкой ИИ доступны в диалоге с ботом.","help"),bot);q("dialog-form").querySelector('button[type="submit"]').hidden=true}
+function manualMealStep(){openDialog("Ручной расчёт",[...mealContext(),{label:"Название продукта или блюда",name:"name"},{label:"Масса, г",name:"weight_g",type:"number",min:"0",step:"0.1"},{label:"Калории для всей порции, ккал",name:"calories",type:"number",min:"0",step:"0.1"},{label:"Белки для всей порции, г",name:"protein_g",type:"number",min:"0",step:"0.1"},{label:"Жиры для всей порции, г",name:"fat_g",type:"number",min:"0",step:"0.1"},{label:"Углеводы для всей порции, г",name:"carbs_g",type:"number",min:"0",step:"0.1"}],async e=>{e.preventDefault();const d=data(e.currentTarget),item={name:d.name,weight_g:d.weight_g===""?null:Number(d.weight_g),portion_text:"",calories:Number(d.calories),protein_g:Number(d.protein_g),fat_g:Number(d.fat_g),carbs_g:Number(d.carbs_g),approximate:false};await createMealDraft(e.currentTarget,d,item)});q("dialog-form").querySelector('button[type="submit"]').textContent="Показать черновик"}
+function referenceSearchStep(){openDialog("Продукт из справочника",[{label:"Название продукта",name:"query"}],async e=>{e.preventDefault();const f=e.currentTarget,d=data(f),box=q("dialog-fields");try{const rows=await api(`${path("referenceSearch")}?${new URLSearchParams({q:d.query,limit:"10"})}`),list=el("div",null,"stack");if(!rows.length)list.append(el("p","Совпадений не найдено. Уточните название или выберите ручной ввод.","empty"));rows.forEach(x=>{const button=el("button",null,"client");button.type="button";button.append(el("strong",x.display_name),el("small",[x.description,x.preparation].filter(Boolean).join(" · ")));button.onclick=()=>referenceAmountStep(x);list.append(button)});const old=box.querySelector(".stack");if(old)old.remove();box.append(list)}catch(err){dialogStatus(err.message)}});q("dialog-form").querySelector('button[type="submit"]').textContent="Найти"}
+function referenceAmountStep(candidate){openDialog("Масса продукта",[...mealContext(),{label:"Выбранный продукт",name:"selected",value:candidate.display_name},{label:"Масса, г",name:"grams",type:"number",min:"0.1",step:"0.1"}],async e=>{e.preventDefault();const f=e.currentTarget,d=data(f);try{const calculated=await formMutation(f,key=>api(path("referenceCalculate"),{method:"POST",idempotency:key,json:{fdc_id:candidate.fdc_id,grams:Number(d.grams)}}));referencePreviewStep(d,calculated)}catch(err){dialogStatus(err.message)}});q("dialog-form").selected.readOnly=true;q("dialog-form").querySelector('button[type="submit"]').textContent="Рассчитать"}
+function referencePreviewStep(context,calculated){openDialog("Проверка расчёта",mealContext().map(x=>({...x,value:context[x.name]??x.value})),async e=>{e.preventDefault();await createMealDraft(e.currentTarget,data(e.currentTarget),{fdc_id:calculated.fdc_id,grams:Number(calculated.grams)})});const p=el("section",null,"card meal-preview"),t=calculated.totals||{};p.append(el("h3",calculated.display_name),el("p",`${num(calculated.grams)} г · ${num(t.kcal)} ккал · Б ${num(t.protein_g)} · Ж ${num(t.fat_g)} · У ${num(t.carbs_g)}`),el("p",[calculated.description,calculated.preparation].filter(Boolean).join(" · "),"help"),el("p",`Источник: ${calculated.source}, версия ${calculated.version}. Расчёт по значениям на 100 г.`,"audit"));q("dialog-fields").after(p);q("dialog-form").querySelector('button[type="submit"]').textContent="Создать черновик"}
+function draftPayload(d,item){return{source:"manual",eaten_at:zonedIso(d.event_date,d.event_time),meal_type:d.meal_type,note:d.note||"",hunger_level:d.hunger_level===""?null:Number(d.hunger_level),mood:d.mood||null,items:[item]}}
+async function createMealDraft(form,d,item){try{const meal=await formMutation(form,key=>api(path("draft"),{method:"POST",idempotency:key,json:draftPayload(d,item)}));confirmMealStep(meal)}catch(err){dialogStatus(err.message)}}
+function confirmMealStep(meal){openDialog("Подтвердить приём",[],async e=>{e.preventDefault();try{await formMutation(e.currentTarget,key=>api(path("confirm",{meal:meal.id}),{method:"POST",idempotency:key,headers:{"If-Match":String(meal.version)}}));closeDialog();today();status("Приём подтверждён и добавлен в дневник")}catch(err){dialogStatus(err.message)}});const p=el("section",null,"card meal-preview"),totals=(meal.items||[]).reduce((s,x)=>{["calories","protein_g","fat_g","carbs_g"].forEach(k=>s[k]+=Number(x[k]||0));return s},{calories:0,protein_g:0,fat_g:0,carbs_g:0});p.append(el("h3",meal.meal_type||"Приём пищи"),el("p",(meal.items||[]).map(x=>x.name).join(", ")),el("p",`${num(totals.calories)} ккал · Б ${num(totals.protein_g)} · Ж ${num(totals.fat_g)} · У ${num(totals.carbs_g)}`),el("p","До подтверждения черновик не входит в дневные и недельные итоги.","help"));q("dialog-fields").after(p);q("dialog-form").querySelector('button[type="submit"]').textContent="Подтвердить и сохранить"}
+function mealDialog(m){
+ const fields=[...eventFields(m.eaten_at,m.timezone),{label:"Тип приёма",name:"meal_type",value:["breakfast","lunch","dinner","snack","other"].includes(m.meal_type)?m.meal_type:"other",options:[["breakfast","Завтрак"],["lunch","Обед"],["dinner","Ужин"],["snack","Перекус"],["other","Другое"]]},{label:"Заметка",name:"note",area:true,value:m.note}];
+ (m.items||[]).forEach((i,index)=>{
+  fields.push({label:`Позиция ${index+1}: название`,name:`item_${index}_name`,value:i.name},{label:`Позиция ${index+1}: масса, г`,name:`item_${index}_weight_g`,type:"number",step:"0.1",value:i.weight_g},{label:`Позиция ${index+1}: ккал`,name:`item_${index}_calories`,type:"number",step:"0.1",value:i.calories},{label:`Позиция ${index+1}: белки, г`,name:`item_${index}_protein_g`,type:"number",step:"0.1",value:i.protein_g},{label:`Позиция ${index+1}: жиры, г`,name:`item_${index}_fat_g`,type:"number",step:"0.1",value:i.fat_g},{label:`Позиция ${index+1}: углеводы, г`,name:`item_${index}_carbs_g`,type:"number",step:"0.1",value:i.carbs_g});
+ });
+ openDialog("Проверить изменения",fields,async e=>{
+  e.preventDefault();const d=data(e.currentTarget),items=(m.items||[]).map((i,index)=>({name:d[`item_${index}_name`],weight_g:d[`item_${index}_weight_g`] === ""?null:Number(d[`item_${index}_weight_g`]),portion_text:i.portion_text||"",calories:Number(d[`item_${index}_calories`]),protein_g:Number(d[`item_${index}_protein_g`]),fat_g:Number(d[`item_${index}_fat_g`]),carbs_g:Number(d[`item_${index}_carbs_g`]),approximate:i.approximate!==false}));
+  try{await formMutation(e.currentTarget,key=>api(path(state.mode==="self"?"selfMeal":"meal",{meal:m.id}),{method:"PATCH",idempotency:key,headers:{"If-Match":String(m.version)},json:{eaten_at:zonedIso(d.event_date,d.event_time,m.timezone||activeTimezone()),meal_type:d.meal_type,note:d.note,items}}));closeDialog();today();status("Приём обновлён")}catch(x){dialogStatus(x.message)}
+ });
+ const preview=el("section",null,"card meal-preview"),title=el("h3","Предпросмотр итогов");q("dialog-fields").after(preview);
+ function updatePreview(){const d=data(q("dialog-form")),totals={calories:0,protein_g:0,fat_g:0,carbs_g:0};(m.items||[]).forEach((_,index)=>Object.keys(totals).forEach(k=>totals[k]+=Number(d[`item_${index}_${k}`]||0)));clear(preview);preview.append(title,el("p",`${num(totals.calories)} ккал · Б ${num(totals.protein_g)} · Ж ${num(totals.fat_g)} · У ${num(totals.carbs_g)}`))}
+ q("dialog-fields").addEventListener("input",updatePreview,{signal:dialogSignal()});updatePreview();
+}
+function dialogSignal(){if(state.dialogAbort)state.dialogAbort.abort();state.dialogAbort=new AbortController();return state.dialogAbort.signal}
+function customDialog(){openDialog("Выбрать диапазон",[{label:"С",name:"from",type:"date",value:state.custom?.from||state.date},{label:"По",name:"to",type:"date",value:state.custom?.to||state.date}],e=>{e.preventDefault();state.custom=data(e.currentTarget);closeDialog();dynamics()})}async function saveNorm(e){e.preventDefault();const f=e.currentTarget,d=data(f),p={effective_from:d.effective_from};["calories","protein_g","fat_g","carbs_g","water_ml"].forEach(k=>{if(d[k]!=="")p[k]=Number(d[k])});try{await formMutation(f,key=>api(path("norms",{client:state.clientId}),{method:"POST",idempotency:key,json:p}));plan();status("Норма сохранена")}catch(x){status(x.message,true)}}
+async function xlsxPreview(file,box){if(!file)return;const p=box.querySelector("[data-preview]");clear(p);if(file.size>2097152){p.append(el("p","Файл больше 2 МБ.","status error"));return}p.append(el("p","Проверяем файл...","help"));try{box.dataset.key=box.dataset.key||idempotency();const d=await api(path("xlsxPreview",{client:state.clientId}),{method:"POST",idempotency:box.dataset.key,body:file,headers:{"Content-Type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}});delete box.dataset.key;clear(p);p.append(el("h3","Предпросмотр"),planTable(d.rows||[]));if(d.conflicts?.length)p.append(el("p",`Совпадающих дат: ${d.conflicts.length}`,"help"));const b=el("button","Применить весь план");b.type="button";b.onclick=()=>xlsxCommit(d.upload_token,p,b);p.append(b)}catch(x){clear(p);p.append(el("p",x.message,"status error"))}}async function xlsxCommit(token,p,button){if(button.dataset.busy)return;button.dataset.busy="1";button.disabled=true;button.dataset.key=button.dataset.key||idempotency();try{await api(path("xlsxCommit",{client:state.clientId}),{method:"POST",idempotency:button.dataset.key,json:{upload_token:token}});delete button.dataset.key;plan();status("План применён полностью")}catch(x){p.append(el("p",x.message,"status error"))}finally{delete button.dataset.busy;button.disabled=false}}
+async function saveProfile(e){e.preventDefault();const f=e.currentTarget,d=data(f),p={display_name:d.display_name,timezone:d.timezone,goal:d.goal,height_cm:d.height_cm===""?null:Number(d.height_cm),initial_weight_kg:d.initial_weight_kg===""?null:Number(d.initial_weight_kg)};try{const saved=await formMutation(f,key=>api(path("profile"),{method:"PATCH",headers:{"If-Match":f.dataset.version},json:p,idempotency:key}));f.dataset.version=saved.version??f.dataset.version;status("Профиль сохранён")}catch(x){status(x.message,true)}}
+function saveBlob(blob,name){const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),30000)}
+async function downloadTemplate(){try{saveBlob(await api(path("template"),{blob:true}),"norms-plan-template.xlsx")}catch(x){status(x.message,true)}}
+async function openClientChat(){try{const d=await api(path("chat",{client:state.clientId}));if(!d.url)throw new Error("Ссылка на чат недоступна.");if(tg?.openTelegramLink)tg.openTelegramLink(d.url);else open(d.url,"_blank","noopener")}catch(x){status(x.message,true)}}
+async function download(format,r){const p=new URLSearchParams({scope:state.mode==="self"?"self":"client",from:r.from,to:r.to,format});if(state.mode==="trainer")p.set("client_id",state.clientId);const url=`${path("export")}?${p}`;if(format==="print"){open(url,"_blank","noopener");return}try{saveBlob(await api(url,{blob:true}),`nutrition-${r.from}-${r.to}.${format}`)}catch(x){status(x.message,true)}}
+qa("[data-view]").forEach(x=>x.onclick=()=>view(x.dataset.view));q("self-mode").onclick=()=>mode("self");q("trainer-mode").onclick=()=>mode("trainer");q("client-search").oninput=clientList;q("back-clients").onclick=()=>{q("clients-panel").dataset.selected="false";q("trainer-detail").dataset.selected="false";q("back-clients").hidden=true};q("refresh").onclick=()=>state.mode==="trainer"?loadClients().then(render):render();q("dialog-cancel").onclick=closeDialog;q("dialog").addEventListener("cancel",e=>{e.preventDefault();closeDialog()});session().catch(e=>status(e.message,true,session));
+})();
+</script></body></html>

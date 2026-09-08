@@ -71,10 +71,10 @@ class FakeStore:
             raise PermissionError("private client detail")
         return {"client": {"id": 10}, "week_start": week_start, "days": [], "averages": {}}
 
-    def update_meal_as_trainer(self, trainer_id, meal_id, updates):
+    def update_meal_as_trainer(self, trainer_id, meal_id, updates, *, expected_version=None):
         if meal_id != 21:
             raise PermissionError("private meal detail")
-        self.meal_calls.append((trainer_id, meal_id, updates))
+        self.meal_calls.append((trainer_id, meal_id, updates, expected_version))
         return {"id": meal_id, **updates}
 
     def set_norms(self, trainer_id, client_id, norms, effective_from):
@@ -83,10 +83,10 @@ class FakeStore:
         self.norm_calls.append((trainer_id, client_id, norms, effective_from))
         return {"client_user_id": client_id, **norms, "effective_from": effective_from}
 
-    def add_comment(self, trainer_id, meal_id, text):
+    def add_comment(self, trainer_id, meal_id, text, *, idempotency_key=None):
         if meal_id != 21:
             raise PermissionError("private meal detail")
-        self.comment_calls.append((trainer_id, meal_id, text))
+        self.comment_calls.append((trainer_id, meal_id, text, idempotency_key))
         return {"meal_id": meal_id, "text": text}
 
 
@@ -174,8 +174,8 @@ def test_api_auth_errors_are_generic_and_do_not_call_store():
         init_data=signed_init_data()[:-1] + "0",
     )
     assert missing[0] == forged[0] == 401
-    assert json.loads(missing[2]) == {"error": "Откройте кабинет заново из бота"}
-    assert json.loads(forged[2]) == {"error": "Откройте кабинет заново из бота"}
+    assert json.loads(missing[2])["error"]["code"] == "authentication_required"
+    assert json.loads(forged[2])["error"]["code"] == "authentication_required"
 
 
 def test_valid_but_non_allowlisted_trainer_is_forbidden():
@@ -186,7 +186,7 @@ def test_valid_but_non_allowlisted_trainer_is_forbidden():
         init_data=signed_init_data(user_id=202),
     )
     assert status == 403
-    assert json.loads(raw) == {"error": "Нет доступа к кабинету тренера"}
+    assert json.loads(raw)["error"]["code"] == "forbidden"
 
 
 @pytest.mark.parametrize(
@@ -199,10 +199,14 @@ def test_valid_but_non_allowlisted_trainer_is_forbidden():
 )
 def test_foreign_client_and_meal_ids_have_same_not_found_response(method, path, payload):
     status, _, raw = request(
-        FakeStore(), method, path, init_data=signed_init_data(), payload=payload
+        FakeStore(), method, path, init_data=signed_init_data(), payload=payload,
+        headers=(
+            {"If-Match": "1"} if method == "PATCH"
+            else {"Idempotency-Key": "comment-test"} if method == "POST" else None
+        ),
     )
     assert status == 404
-    assert json.loads(raw) == {"error": "Данные не найдены"}
+    assert json.loads(raw)["error"]["code"] == "not_found"
 
 
 @pytest.mark.parametrize(
@@ -223,7 +227,7 @@ def test_bad_norms_are_rejected_before_store_mutation(payload):
         init_data=signed_init_data(),
         payload=payload,
     )
-    assert status == 400
+    assert status == 422
     assert store.norm_calls == []
 
 
@@ -251,10 +255,12 @@ def test_meal_update_passes_only_validated_store_contract():
         "/api/meals/21",
         init_data=signed_init_data(),
         payload=payload,
+        headers={"If-Match": "4"},
     )
     assert status == 200
     assert store.meal_calls[0][0:2] == (TRAINER_ID, 21)
     assert store.meal_calls[0][2]["items"][0]["weight_g"] == 180.0
+    assert store.meal_calls[0][3] == 4
 
 
 def test_internal_exception_does_not_leak_details():
@@ -264,7 +270,7 @@ def test_internal_exception_does_not_leak_details():
         store, "GET", "/api/clients", init_data=signed_init_data()
     )
     assert status == 500
-    assert json.loads(raw) == {"error": "Не удалось выполнить запрос, попробуйте позже"}
+    assert json.loads(raw)["error"]["code"] == "internal_error"
     assert b"secret" not in raw
 
 

@@ -80,7 +80,11 @@ def test_complete_real_v1_fixture_migrates_without_data_loss(tmp_path: Path) -> 
     store = NutritionStore(db_path)
     after = _snapshot_v1(db_path)
 
-    assert set(after) == set(before)
+    assert set(before).issubset(after)
+    assert {
+        "nutrition_profiles", "weight_logs", "nutrition_web_login_tokens",
+        "nutrition_web_sessions", "nutrition_plan_previews",
+    }.issubset(after)
     for table, old in before.items():
         assert len(after[table]["rows"]) == len(old["rows"]), table
         if table == "schema_meta":
@@ -94,7 +98,7 @@ def test_complete_real_v1_fixture_migrates_without_data_loss(tmp_path: Path) -> 
 
     with sqlite3.connect(db_path) as db:
         db.row_factory = sqlite3.Row
-        assert db.execute("SELECT version FROM schema_meta").fetchone()[0] == 2
+        assert db.execute("SELECT version FROM schema_meta").fetchone()[0] == 4
         migrated_item = db.execute("SELECT * FROM meal_items").fetchone()
         assert migrated_item["calculation_method"] == "ai"
         assert all(

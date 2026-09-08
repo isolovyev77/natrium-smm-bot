@@ -86,7 +86,7 @@ def test_v1_migration_preserves_rows_and_marks_old_invites_one_time(tmp_path: Pa
 
     with sqlite3.connect(db_path) as db:
         db.row_factory = sqlite3.Row
-        assert db.execute("SELECT version FROM schema_meta").fetchone()[0] == 2
+        assert db.execute("SELECT version FROM schema_meta").fetchone()[0] == 4
         item = dict(db.execute("SELECT * FROM meal_items WHERE meal_id=77").fetchone())
         assert item["name"] == "Старая запись"
         assert item["calories"] == 120
@@ -177,7 +177,7 @@ def test_v1_migration_rolls_back_as_one_unit_and_can_reopen(tmp_path: Path) -> N
 
     store = NutritionStore(db_path)
     with sqlite3.connect(store.db_path) as db:
-        assert db.execute("SELECT version FROM schema_meta").fetchone()[0] == 2
+        assert db.execute("SELECT version FROM schema_meta").fetchone()[0] == 4
         assert db.execute(
             "SELECT invite_kind FROM trainer_invites WHERE code='BROKENOLD'"
         ).fetchone()[0] == "one_time"
