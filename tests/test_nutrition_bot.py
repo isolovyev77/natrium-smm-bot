@@ -132,6 +132,8 @@ class FakeAI:
         self.error = error
         self.text_calls = []
         self.photo_calls = []
+        self.clarification_calls = []
+        self.correction_calls = []
 
     def analyze_text(self, text):
         self.text_calls.append(text)
@@ -144,6 +146,18 @@ class FakeAI:
         if self.error:
             raise self.error
         return self.result
+
+    def apply_clarification(self, answer, current_items, *, item_index=None):
+        self.clarification_calls.append((answer, current_items, item_index))
+        if self.error:
+            raise self.error
+        return self.result
+
+    def correct_draft_item(self, instruction, current_items, item_index=None):
+        self.correction_calls.append((instruction, current_items, item_index))
+        if self.error:
+            raise self.error
+        return dict(self.result["items"][0])
 
 
 class DisabledAI(FakeAI):
@@ -218,9 +232,62 @@ def test_private_start_opens_diary_without_consuming_unrelated_smm_updates(store
     assert context.user_data["nutrition_active"] is True
     text, kwargs = update.message.outbound[-1]
     assert "Дневник питания" in text
+    assert "Первый шаг" in text
+    assert "подтвержденные записи" in text
+    assert "нормы задает тренер" in text
     assert "nutrition:add_meal" in nutrition_callbacks(kwargs["reply_markup"])
+    assert "nutrition:link" in nutrition_callbacks(kwargs["reply_markup"])
     assert run(ctl.handle_callback(make_update(callback_data="smm:themes"), context)) is False
     assert run(ctl.handle_text(make_update(text="обычный SMM запрос"), make_context())) is False
+
+
+def test_returning_menu_separates_daily_actions_from_settings_and_keeps_old_callbacks(store):
+    ctl = controller(store)
+    ctl._ensure_user(make_update())
+    context = make_context(state={"nutrition_active": True})
+
+    menu = make_update(callback_data="nutrition:menu")
+    run(ctl.handle_callback(menu, context))
+    text, kwargs = menu.callback_query.edits[-1]
+    callbacks = nutrition_callbacks(kwargs["reply_markup"])
+    assert "Первый шаг" not in text
+    assert "nutrition:add_meal" in callbacks
+    assert "nutrition:comments" in callbacks
+    assert "nutrition:repeat" in callbacks
+    assert "nutrition:settings" in callbacks
+    assert "nutrition:profile" not in callbacks
+    assert "nutrition:timezone" not in callbacks
+
+    settings = make_update(callback_data="nutrition:settings")
+    run(ctl.handle_callback(settings, context))
+    settings_callbacks = nutrition_callbacks(settings.callback_query.edits[-1][1]["reply_markup"])
+    assert "nutrition:profile" in settings_callbacks
+    assert "nutrition:timezone" in settings_callbacks
+    assert "nutrition:link" in settings_callbacks
+    assert "nutrition:menu" in settings_callbacks
+
+    old_profile = make_update(callback_data="nutrition:profile")
+    run(ctl.handle_callback(old_profile, context))
+    assert "Профиль" in old_profile.callback_query.message.outbound[-1][0]
+
+
+def test_link_code_explains_visibility_norms_and_next_step(store):
+    ctl = controller(store, trainer_ids={TRAINER_ID})
+    ctl._ensure_user(make_update(user_id=TRAINER_ID))
+    invite = store.create_trainer_invite(trainer_telegram_id=TRAINER_ID)
+    context = make_context(state={"nutrition_active": True})
+    ctl._ensure_user(make_update())
+
+    run(ctl.handle_callback(make_update(callback_data="nutrition:link"), context))
+    linked = make_update(text=invite["code"])
+    run(ctl.handle_text(linked, context))
+
+    text, kwargs = linked.message.outbound[-1]
+    assert "подтвержденные записи" in text
+    assert "нормы задает тренер" in text
+    assert "Следующий шаг" in text
+    assert "nutrition:add_meal" in nutrition_callbacks(kwargs["reply_markup"])
+    assert context.user_data == {"nutrition_active": True}
 
 
 def test_group_start_is_redirected_without_creating_profile_or_active_state(store):
@@ -306,6 +373,165 @@ def test_confirmed_photo_is_counted_only_after_human_confirmation_and_is_idempot
     assert ai.photo_calls == [(b"photo-bytes", "image/jpeg")]
 
 
+def test_photo_clarification_replaces_wrong_hypothesis_instead_of_appending(store):
+    wrong = {
+        "name": "Овсянка с ягодами годжи", "weight_g": 150, "portion_text": "",
+        "calories": 220, "protein_g": 7, "fat_g": 5, "carbs_g": 36,
+        "approximate": True,
+    }
+    corrected = {
+        "name": "Гречневые хлопья с семенами и кедровыми орехами",
+        "weight_g": 294, "portion_text": "", "calories": 400,
+        "protein_g": 12, "fat_g": 18, "carbs_g": 50, "approximate": True,
+    }
+
+    class ClarifyingAI(FakeAI):
+        def apply_clarification(self, answer, current_items, *, item_index=None):
+            self.clarification_calls.append((answer, current_items, item_index))
+            return {
+                "items": [corrected], "questions": [],
+                "operation": "replace", "target_index": 0,
+            }
+
+    ai = ClarifyingAI(result={
+        "items": [wrong],
+        "questions": ["Какой именно ингредиент используется для овсянки?"],
+    })
+    ctl = controller(store, ai)
+    ctl._ensure_user(make_update())
+    store.set_photo_consent(telegram_id=CLIENT_ID, version=PHOTO_CONSENT_VERSION)
+    context = make_context(
+        state={"nutrition_active": True, "nutrition_state": "wait_photo"},
+        bot=FakeBot(b"photo"),
+    )
+
+    run(ctl.handle_photo(make_update(photo_file_id="meal-photo"), context))
+    assert context.user_data["nutrition_pending_items"] == [wrong]
+    answer = "Это гречневые хлопья с семенами и кедровыми орехами 294г"
+    clarified = make_update(text=answer)
+    run(ctl.handle_text(clarified, context))
+
+    meal_id = context.user_data["nutrition_draft_meal_id"]
+    meal = store.get_owned_draft(client_telegram_id=CLIENT_ID, meal_id=meal_id)
+    assert meal["status"] == "draft"
+    assert len(meal["items"]) == 1
+    assert meal["items"][0]["name"] == corrected["name"]
+    assert meal["items"][0]["weight_g"] == 294
+    assert all("Овсянка" not in item["name"] for item in meal["items"])
+    assert ai.clarification_calls == [(answer, [wrong], None)]
+    assert f"nutrition:confirm:{meal_id}" in nutrition_callbacks(
+        clarified.message.outbound[-1][1]["reply_markup"]
+    )
+
+
+def test_plain_draft_correction_selects_one_item_and_requires_new_confirmation(store):
+    correction = {
+        "name": "Гречневые хлопья с семенами и кедровыми орехами",
+        "weight_g": 294, "portion_text": "", "calories": 400,
+        "protein_g": 12, "fat_g": 18, "carbs_g": 50, "approximate": True,
+    }
+    ai = FakeAI(result={"items": [correction], "questions": []})
+    ctl = controller(store, ai)
+    ctl._ensure_user(make_update())
+    draft = store.create_meal_draft(
+        client_telegram_id=CLIENT_ID,
+        source="manual",
+        eaten_at="2026-09-08T10:21:00+03:00",
+        meal_type="завтрак",
+        items=[
+            {
+                "name": "Яблоко", "weight_g": 100, "portion_text": "",
+                "calories": 52, "protein_g": 0.3, "fat_g": 0.2, "carbs_g": 14,
+                "approximate": False,
+            },
+            {
+                "name": "Овсянка с ягодами годжи", "weight_g": 150,
+                "portion_text": "", "calories": 220, "protein_g": 7,
+                "fat_g": 5, "carbs_g": 36, "approximate": True,
+            },
+        ],
+    )
+    context = make_context(state={
+        "nutrition_active": True,
+        "nutrition_state": "draft",
+        "nutrition_draft_meal_id": draft["id"],
+    })
+    instruction = "Это гречневые хлопья с семенами и кедровыми орехами 294г"
+    asked = make_update(text=instruction)
+    run(ctl.handle_text(asked, context))
+
+    assert context.user_data["nutrition_state"] == "draft_correction_target"
+    assert ai.correction_calls == []
+    second = next(
+        value
+        for value in nutrition_callbacks(asked.message.outbound[-1][1]["reply_markup"])
+        if value.endswith(":1")
+    )
+    selected = make_update(callback_data=second)
+    run(ctl.handle_callback(selected, context))
+
+    updated = store.get_owned_draft(client_telegram_id=CLIENT_ID, meal_id=draft["id"])
+    assert [item["name"] for item in updated["items"]] == [
+        "Яблоко", correction["name"],
+    ]
+    assert updated["items"][1]["weight_g"] == 294
+    assert updated["status"] == "draft"
+    assert ai.correction_calls[0][0] == instruction
+    assert ai.correction_calls[0][2] == 1
+    callbacks = nutrition_callbacks(selected.message.outbound[-1][1]["reply_markup"])
+    assert f"nutrition:confirm:{draft['id']}" in callbacks
+
+
+def test_ai_correction_does_not_overwrite_a_draft_changed_while_ai_runs(store):
+    ai = FakeAI()
+    ctl = controller(store, ai)
+    ctl._ensure_user(make_update())
+    draft = store.create_meal_draft(
+        client_telegram_id=CLIENT_ID,
+        source="manual",
+        eaten_at="2026-09-08T10:21:00+03:00",
+        meal_type="завтрак",
+        items=[{
+            "name": "Овсянка", "weight_g": 150, "portion_text": "",
+            "calories": 500, "protein_g": 10, "fat_g": 20, "carbs_g": 30,
+            "approximate": True,
+        }],
+    )
+
+    def change_in_web_before_ai_returns(instruction, current_items, item_index=None):
+        fresh = store.get_owned_draft(
+            client_telegram_id=CLIENT_ID, meal_id=draft["id"]
+        )
+        web_items = [dict(item) for item in fresh["items"]]
+        web_items[0]["name"] = "Исправлено в веб-кабинете"
+        store.replace_draft_items(
+            client_telegram_id=CLIENT_ID,
+            meal_id=draft["id"],
+            items=web_items,
+            expected_version=fresh["version"],
+        )
+        return dict(ai.result["items"][0])
+
+    ai.correct_draft_item = change_in_web_before_ai_returns
+    context = make_context(state={
+        "nutrition_active": True,
+        "nutrition_state": "draft",
+        "nutrition_draft_meal_id": draft["id"],
+    })
+    instruction = "Это гречневые хлопья 294 г"
+    changed = make_update(text=instruction)
+    run(ctl.handle_text(changed, context))
+
+    fresh = store.get_owned_draft(client_telegram_id=CLIENT_ID, meal_id=draft["id"])
+    assert fresh["items"][0]["name"] == "Исправлено в веб-кабинете"
+    assert context.user_data["nutrition_state"] == "draft"
+    assert context.user_data["nutrition_stale_correction_instruction"] == instruction
+    text = changed.message.outbound[-1][0]
+    assert "изменился" in text
+    assert "не применено" in text
+    assert instruction in text
+
+
 def test_structured_manual_draft_can_be_cancelled_and_never_enters_totals(store):
     ctl = controller(store)
     context = make_context(state={"nutrition_active": True, "nutrition_state": "wait_manual"})
@@ -320,6 +546,116 @@ def test_structured_manual_draft_can_be_cancelled_and_never_enters_totals(store)
     day = store.get_own_day(client_telegram_id=CLIENT_ID, local_date=ctl._today(CLIENT_ID))
     assert day["meals"] == []
     assert day["totals"]["calories"] == 0
+
+
+def test_guided_weight_edit_rescales_portion_and_preserves_other_items(store):
+    ctl = controller(store)
+    ctl._ensure_user(make_update())
+    draft = store.create_meal_draft(
+        client_telegram_id=CLIENT_ID,
+        source="manual",
+        eaten_at="2026-09-08T10:21:00+03:00",
+        meal_type="завтрак",
+        items=[
+            {
+                "name": "Хлопья", "weight_g": 150, "portion_text": "",
+                "calories": 500, "protein_g": 10, "fat_g": 20, "carbs_g": 30,
+                "approximate": True,
+            },
+            {
+                "name": "Ягоды", "weight_g": 50, "portion_text": "",
+                "calories": 40, "protein_g": 1, "fat_g": 0, "carbs_g": 9,
+                "approximate": False,
+            },
+        ],
+    )
+    context = make_context(state={
+        "nutrition_active": True,
+        "nutrition_state": "draft",
+        "nutrition_draft_meal_id": draft["id"],
+    })
+
+    choose_item = make_update(callback_data=f"nutrition:edit:{draft['id']}")
+    run(ctl.handle_callback(choose_item, context))
+    first_item = next(
+        value
+        for value in nutrition_callbacks(choose_item.callback_query.edits[-1][1]["reply_markup"])
+        if value.endswith(":0")
+    )
+    fields = make_update(callback_data=first_item)
+    run(ctl.handle_callback(fields, context))
+    weight_field = next(
+        value
+        for value in nutrition_callbacks(fields.message.outbound[-1][1]["reply_markup"])
+        if value.endswith(":weight_g")
+    )
+    run(ctl.handle_callback(make_update(callback_data=weight_field), context))
+    changed = make_update(text="294")
+    run(ctl.handle_text(changed, context))
+
+    updated = store.get_owned_draft(client_telegram_id=CLIENT_ID, meal_id=draft["id"])
+    first, second = updated["items"]
+    assert first["weight_g"] == 294
+    assert first["calories"] == 980
+    assert first["protein_g"] == 19.6
+    assert first["fat_g"] == 39.2
+    assert first["carbs_g"] == 58.8
+    assert first["calculation_method"] == "manual"
+    assert bool(first["approximate"]) is True
+    assert second["name"] == "Ягоды"
+    assert second["weight_g"] == 50
+    assert second["calories"] == 40
+    assert updated["status"] == "draft"
+    assert f"nutrition:confirm:{draft['id']}" in nutrition_callbacks(
+        changed.message.outbound[-1][1]["reply_markup"]
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        (
+            "🍽 Черновик #2\n"
+            "завтрак, 08.09.2026 10:21\n"
+            "• Гречневые хлопья с семенами и кедровыми орехами, 294 г: "
+            "400 ккал, Б 12, Ж 18, У 50"
+        ),
+        (
+            "• Гречневые хлопья с семенами и кедровыми орехами, 294 г: "
+            "400 ккал, Б 12, Ж 18, У 50"
+        ),
+        (
+            "Гречневые хлопья с семенами и кедровыми орехами,\n"
+            "294 г:\n400 ккал,\nБ 12,\nЖ 18,\nУ 50"
+        ),
+        (
+            "Гречневые хлопья с семенами и кедровыми орехами и ягодами годжи\n"
+            "294\n400\n12\n18\n50"
+        ),
+        "Гречневые хлопья с семенами и кедровыми орехами;294;400;12;18;50",
+    ],
+)
+def test_manual_parser_accepts_copied_draft_and_simple_offline_formats(payload):
+    item = NutritionBotController.parse_structured_items(payload)[0]
+    assert item["name"].startswith("Гречневые хлопья")
+    assert item["weight_g"] == 294
+    assert item["calories"] == 400
+    assert item["protein_g"] == 12
+    assert item["fat_g"] == 18
+    assert item["carbs_g"] == 50
+
+
+@pytest.mark.parametrize(
+    ("payload", "field"),
+    [
+        ("Хлопья, 294 г: 400 ккал, Б 12, Ж 18", "углеводы"),
+        ("Хлопья;294;nan;12;18;50", "калорийность"),
+        ("Хлопья;294;400;-1;18;50", "белки"),
+    ],
+)
+def test_manual_parser_rejects_missing_nonfinite_and_negative_values(payload, field):
+    with pytest.raises(ValueError, match=field):
+        NutritionBotController.parse_structured_items(payload)
 
 
 def test_ai_failure_keeps_manual_route_and_does_not_create_draft(store):
@@ -345,6 +681,11 @@ def test_clarification_failure_retains_prior_context_for_retry(store):
             "nutrition_active": True,
             "nutrition_state": "clarify_ai",
             "nutrition_pending_description": "гречка и курица",
+            "nutrition_pending_items": [{
+                "name": "Гречка", "weight_g": 180, "portion_text": "",
+                "calories": 190, "protein_g": 6, "fat_g": 2, "carbs_g": 38,
+                "approximate": True,
+            }],
             "nutrition_pending_source": "photo",
             "nutrition_pending_photo_file_id": "file-1",
         }
@@ -354,6 +695,9 @@ def test_clarification_failure_retains_prior_context_for_retry(store):
     assert context.user_data["nutrition_pending_description"] == "гречка и курица"
     assert context.user_data["nutrition_pending_source"] == "photo"
     assert context.user_data["nutrition_pending_photo_file_id"] == "file-1"
+    assert len(ai.clarification_calls) == 1
+    assert ai.clarification_calls[0][0] == "порция 300 г"
+    assert ai.clarification_calls[-1][0] == "порция 300 г"
 
 
 def test_telegram_file_error_switches_to_manual_without_propagating(store):
@@ -645,6 +989,69 @@ def test_trainer_comment_flow_uses_named_meal_plain_text_and_navigation(store):
     context.user_data["nutrition_pending_plan"] = [{"stale": True}]
     run(ctl.start(make_update(user_id=TRAINER_ID), context))
     assert context.user_data == {"nutrition_active": True}
+
+
+def test_client_reads_latest_trainer_comments_without_internal_ids(store):
+    ctl = controller(store, trainer_ids={TRAINER_ID})
+    meal = _linked_confirmed_meal(store, ctl)
+    store.add_comment(TRAINER_ID, meal["id"], "Добавьте овощи к обеду")
+    context = make_context(state={"nutrition_active": True})
+
+    opened = make_update(callback_data="nutrition:comments")
+    run(ctl.handle_callback(opened, context))
+
+    text, kwargs = opened.callback_query.edits[-1]
+    assert "Добавьте овощи к обеду" in text
+    assert "Тренер" in text
+    assert "завтрак" in text
+    assert str(TRAINER_ID) not in text
+    assert "nutrition:menu" in nutrition_callbacks(kwargs["reply_markup"])
+
+
+def test_repeat_picker_deduplicates_double_tap_and_new_picker_allows_new_draft(store):
+    ctl = controller(store, trainer_ids={TRAINER_ID})
+    original = _linked_confirmed_meal(store, ctl)
+    context = make_context(state={"nutrition_active": True})
+
+    picker = make_update(callback_data="nutrition:repeat")
+    run(ctl.handle_callback(picker, context))
+    repeat_callback = next(
+        value
+        for value in nutrition_callbacks(picker.callback_query.edits[-1][1]["reply_markup"])
+        if value.startswith("nutrition:repeat_meal:")
+    )
+    first_draft_id = None
+    for callback_id in ("repeat-tap-1", "repeat-tap-2"):
+        repeated = make_update(callback_data=repeat_callback, callback_id=callback_id)
+        run(ctl.handle_callback(repeated, context))
+        current_id = context.user_data["nutrition_draft_meal_id"]
+        first_draft_id = first_draft_id or current_id
+        assert current_id == first_draft_id
+
+    draft_id = context.user_data["nutrition_draft_meal_id"]
+    draft = store.get_owned_draft(client_telegram_id=CLIENT_ID, meal_id=draft_id)
+    assert draft_id != original["id"]
+    assert draft["status"] == "draft"
+    assert [item["name"] for item in draft["items"]] == ["Омлет"]
+    assert draft["comments"] == []
+    text, kwargs = repeated.message.outbound[-1]
+    assert "новый неподтвержденный черновик" in text
+    callbacks = nutrition_callbacks(kwargs["reply_markup"])
+    assert f"nutrition:edit:{draft_id}" in callbacks
+    assert f"nutrition:meal_context:{draft_id}" in callbacks
+    recent = store.list_own_recent_meals(client_telegram_id=CLIENT_ID, limit=10)
+    assert [meal["id"] for meal in recent] == [original["id"]]
+
+    second_picker = make_update(callback_data="nutrition:repeat")
+    run(ctl.handle_callback(second_picker, context))
+    second_callback = next(
+        value
+        for value in nutrition_callbacks(second_picker.callback_query.edits[-1][1]["reply_markup"])
+        if value.startswith("nutrition:repeat_meal:")
+    )
+    assert second_callback != repeat_callback
+    run(ctl.handle_callback(make_update(callback_data=second_callback), context))
+    assert context.user_data["nutrition_draft_meal_id"] != first_draft_id
 
 
 def test_stale_trainer_meal_callback_is_denied_after_unlink(store):
@@ -972,8 +1379,8 @@ class FakeHelpService:
         self.calls = []
         self.result = result
 
-    def answer(self, question, help_context):
-        self.calls.append((question, help_context))
+    def answer(self, question, help_context, *, history=None):
+        self.calls.append((question, help_context, list(history or [])))
         return self.result
 
     def fallback_answer(self, question, help_context):
@@ -1029,7 +1436,15 @@ def test_natural_help_from_menu_and_manual_field_preserves_input_state(store):
     run(ctl.handle_text(menu_question, context))
     assert helper.calls[-1][0] == "Что вы умеете?"
     assert helper.calls[-1][1].screen == "Меню дневника"
+    assert helper.calls[-1][2] == []
+    followup = make_update(text="А где это открыть?")
+    run(ctl.handle_text(followup, context))
+    assert helper.calls[-1][2] == [{
+        "question": "Что вы умеете?",
+        "answer": "Ответ по всем пунктам.",
+    }]
     run(ctl.handle_callback(make_update(callback_data="nutrition:help_resume"), context))
+    assert "nutrition_help_history" not in context.user_data
 
     run(ctl.handle_callback(make_update(callback_data="nutrition:meal_manual"), context))
     run(ctl.handle_text(make_update(text="Рис"), context))
@@ -1042,6 +1457,7 @@ def test_natural_help_from_menu_and_manual_field_preserves_input_state(store):
     field_question = make_update(text="Зачем нужна масса всей порции?")
     run(ctl.handle_text(field_question, context))
     assert helper.calls[-1][0] == "Зачем нужна масса всей порции?"
+    assert helper.calls[-1][2] == []
     saved = context.user_data["nutrition_help_return"]
     assert saved["nutrition_manual_nonce"] == nonce
     assert saved["nutrition_manual_step"] == 1
@@ -1051,6 +1467,37 @@ def test_natural_help_from_menu_and_manual_field_preserves_input_state(store):
     assert context.user_data["nutrition_manual_nonce"] == nonce
     assert context.user_data["nutrition_manual_step"] == 1
     assert context.user_data["nutrition_manual_item"] == {"name": "Рис"}
+
+
+def test_help_followup_uses_bounded_sanitized_history_and_clears_on_context_change(store):
+    helper = FakeHelpService(result="На каком экране вы находитесь?")
+    ctl = controller(store, help_service=helper)
+    ctl._ensure_user(make_update())
+    context = make_context(state={"nutrition_active": True})
+
+    run(ctl.handle_callback(make_update(callback_data="nutrition:help"), context))
+    run(ctl.handle_text(
+            make_update(text="Мой рацион: овсянка\nTelegram ID 123456789. Почему значение другое?"),
+        context,
+    ))
+    helper.result = "На экране недели учитываются подтвержденные записи."
+    run(ctl.handle_text(make_update(text="Я на экране недели"), context))
+
+    assert len(helper.calls) == 2
+    history = helper.calls[-1][2]
+    assert len(history) == 1
+    serialized = repr(history)
+    assert "123456789" not in serialized
+    assert "овсянка" not in serialized.casefold()
+    assert "[ID скрыт]" in serialized
+    assert "[рацион скрыт]" in serialized
+
+    run(ctl.handle_callback(make_update(callback_data="nutrition:menu"), context))
+    assert "nutrition_help_history" not in context.user_data
+    run(ctl.handle_callback(make_update(callback_data="nutrition:meal_manual"), context))
+    run(ctl.handle_text(make_update(text="Что сюда писать?"), context))
+    assert helper.calls[-1][1].state == "manual_item"
+    assert helper.calls[-1][2] == []
 
 
 def test_help_inside_norms_preserves_draft_step_and_nonce(store):
@@ -1265,6 +1712,35 @@ def test_profile_wizard_and_cancel_are_atomic(store):
     run(ctl.handle_text(make_update(text="Не сохранять"), context))
     run(ctl.handle_callback(make_update(callback_data="nutrition:profile"), context))
     assert store.get_profile(telegram_id=CLIENT_ID)["display_name"] == "Анна"
+
+
+def test_weight_skip_note_save_then_main_menu_clears_wizard(store):
+    ctl = controller(store)
+    ctl._ensure_user(make_update())
+    context = make_context(state={"nutrition_active": True})
+
+    run(ctl.handle_callback(make_update(callback_data="nutrition:weight_add"), context))
+    run(ctl.handle_text(make_update(text="82.5"), context))
+    nonce = context.user_data["nutrition_weight_nonce"]
+    run(ctl.handle_callback(
+        make_update(callback_data=f"nutrition:weight_date:{nonce}:today"), context
+    ))
+    run(ctl.handle_text(make_update(text="07:30"), context))
+    run(ctl.handle_callback(
+        make_update(callback_data=f"nutrition:weight_note_skip:{nonce}"), context
+    ))
+    saved = make_update(callback_data=f"nutrition:weight_confirm:{nonce}")
+    run(ctl.handle_callback(saved, context))
+
+    text, kwargs = saved.callback_query.message.outbound[-1]
+    assert "Вес 82.5 кг сохранен" in text
+    assert "nutrition:menu" in nutrition_callbacks(kwargs["reply_markup"])
+    assert context.user_data == {"nutrition_active": True}
+
+    menu = make_update(callback_data="nutrition:menu")
+    run(ctl.handle_callback(menu, context))
+    assert "Дневник питания" in menu.callback_query.edits[-1][0]
+    assert context.user_data == {"nutrition_active": True}
 
 
 def test_weight_add_history_edit_and_cancel(store):

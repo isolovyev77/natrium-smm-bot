@@ -13,6 +13,7 @@ import copy
 import html
 import math
 import os
+import re
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -22,8 +23,21 @@ from zoneinfo import ZoneInfo
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import ContextTypes
 
-from src.nutrition_ai import NutritionAI, NutritionAIResponseError, NutritionAIUnavailable
-from src.nutrition_help import NutritionHelp, NutritionHelpContext, is_help_question
+from src.nutrition_ai import (
+    NutritionAI,
+    NutritionAIIntentAmbiguous,
+    NutritionAIResponseError,
+    NutritionAITargetAmbiguous,
+    NutritionAIUnavailable,
+)
+from src.nutrition_help import (
+    MAX_HISTORY_TURNS,
+    NutritionHelp,
+    NutritionHelpContext,
+    is_help_question,
+    sanitize_help_text,
+)
+from src.nutrition_input import parse_manual_items
 from src.nutrition_plan import NutritionPlanError, build_template, parse_plan
 from src.nutrition_reference import FoodReference, FoodReferenceError
 from src.nutrition_store import NutritionStore
@@ -126,10 +140,11 @@ class NutritionBotController:
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._private_only(update, context):
             return
+        first_visit = self.store.get_user_by_telegram_id(update.effective_user.id) is None
         self._ensure_user(update)
         self._clear(context)
         context.user_data["nutrition_active"] = True
-        await self._send_menu(update, context)
+        await self._send_menu(update, context, first_visit=first_visit)
 
     async def show_today(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Показывает личную дневную сводку для команды /today."""
@@ -182,7 +197,7 @@ class NutritionBotController:
         context.user_data["nutrition_active"] = True
         data = query.data
         if data not in {"nutrition:help", "nutrition:help_resume"}:
-            context.user_data.pop("nutrition_help_return", None)
+            self._clear_help_session(context)
         try:
             if data == "nutrition:help":
                 await self._enter_help(update, context)
@@ -192,6 +207,8 @@ class NutritionBotController:
                 self._clear(context)
                 context.user_data["nutrition_active"] = True
                 await self._send_menu(update, context, edit=True)
+            elif data == "nutrition:settings":
+                await self._show_settings(update)
             elif data == "nutrition:add_meal":
                 self._clear_reference_context(context)
                 self._clear_manual_flow(context)
@@ -342,12 +359,49 @@ class NutritionBotController:
                 )
             elif data.startswith("nutrition:edit:"):
                 meal_id = int(data.rsplit(":", 1)[1])
+                await self._show_draft_item_picker(update, context, meal_id)
+            elif data.startswith("nutrition:edit_full:"):
+                meal_id = int(data.rsplit(":", 1)[1])
+                meal = self.store.get_owned_draft(
+                    client_telegram_id=update.effective_user.id,
+                    meal_id=meal_id,
+                )
                 context.user_data["nutrition_state"] = "edit_draft"
                 context.user_data["nutrition_edit_meal_id"] = meal_id
+                context.user_data["nutrition_edit_version"] = meal["version"]
                 await query.edit_message_text(
-                    "Пришлите исправленный список, каждое блюдо с новой строки:\n"
-                    "Название; масса в г или описание порции; ккал; белки; жиры; углеводы",
+                    "Пришлите данные блюда обычным блоком или в прежнем формате:\n"
+                    "Название; масса в г; ккал; белки; жиры; углеводы",
                     reply_markup=self._cancel_keyboard(f"nutrition:draft:{meal_id}"),
+                )
+            elif data.startswith("nutrition:edit_item:"):
+                _, _, meal_raw, index_raw = data.split(":", 3)
+                await self._show_draft_field_picker(
+                    update, context, int(meal_raw), int(index_raw)
+                )
+            elif data.startswith("nutrition:edit_field:"):
+                _, _, meal_raw, index_raw, field = data.split(":", 4)
+                await self._start_draft_field_edit(
+                    update, context, int(meal_raw), int(index_raw), field
+                )
+            elif data.startswith("nutrition:correct:"):
+                meal_id = int(data.rsplit(":", 1)[1])
+                await self._start_draft_correction(update, context, meal_id=meal_id)
+            elif data.startswith("nutrition:correct_item:"):
+                _, _, meal_raw, index_raw = data.split(":", 3)
+                await self._choose_draft_correction_item(update, context, int(meal_raw), int(index_raw))
+            elif data.startswith("nutrition:clarify_item:"):
+                _, _, nonce, index_raw = data.split(":", 3)
+                if (
+                    context.user_data.get("nutrition_state") != "clarify_ai_target"
+                    or context.user_data.get("nutrition_clarify_nonce") != nonce
+                ):
+                    raise PermissionError("Этот выбор блюда уже устарел")
+                await self._apply_ai_clarification(
+                    update,
+                    context,
+                    str(context.user_data.get("nutrition_pending_clarification", "")),
+                    item_index=int(index_raw),
                 )
             elif data.startswith("nutrition:cancel:"):
                 meal_id = int(data.rsplit(":", 1)[1])
@@ -598,11 +652,41 @@ class NutritionBotController:
                         [[InlineKeyboardButton("⬅️ Назад", callback_data="nutrition:menu")]]
                     ),
                 )
+            elif data == "nutrition:comments":
+                await self._show_own_trainer_comments(update)
+            elif data == "nutrition:repeat":
+                await self._show_repeat_picker(update, context)
+            elif data.startswith("nutrition:repeat_meal:"):
+                parts = data.split(":")
+                attempt = context.user_data.get("nutrition_repeat_attempt") or {}
+                if len(parts) != 4 or parts[2] != attempt.get("nonce"):
+                    await self._show_repeat_picker(update, context)
+                    return True
+                meal_id = int(parts[3])
+                eaten_at = str(attempt["eaten_at"])
+                meal = self.store.repeat_own_meal(
+                    client_telegram_id=update.effective_user.id,
+                    meal_id=meal_id,
+                    eaten_at=eaten_at,
+                    idempotency_key=(
+                        f"repeat:{update.effective_user.id}:{parts[2]}:{meal_id}"
+                    ),
+                )
+                await self._show_draft(
+                    update,
+                    context,
+                    meal,
+                    notice=(
+                        "Повтор создан как новый неподтвержденный черновик. "
+                        "Массу можно изменить вручную, дату и время в разделе "
+                        "«Контекст приема»."
+                    ),
+                )
             elif data == "nutrition:link":
                 context.user_data["nutrition_state"] = "wait_link_code"
                 await query.edit_message_text(
                     "Введите код, который прислал ваш тренер:",
-                    reply_markup=self._cancel_keyboard("nutrition:menu"),
+                    reply_markup=self._cancel_keyboard("nutrition:settings"),
                 )
             elif data == "nutrition:unlink":
                 self.store.unlink_trainer(client_telegram_id=update.effective_user.id)
@@ -616,7 +700,7 @@ class NutritionBotController:
                 context.user_data["nutrition_state"] = "wait_timezone"
                 await query.edit_message_text(
                     "Введите часовой пояс в формате IANA, например Europe/Moscow или Asia/Tokyo:",
-                    reply_markup=self._cancel_keyboard("nutrition:menu"),
+                    reply_markup=self._cancel_keyboard("nutrition:settings"),
                 )
             elif data == "nutrition:trainer":
                 self._require_trainer(update.effective_user.id)
@@ -1167,18 +1251,13 @@ class NutritionBotController:
                 items = self.parse_structured_items(text)
                 await self._create_draft(update, context, items, source="manual")
             elif state == "clarify_ai":
-                prior = context.user_data.get("nutrition_pending_description", "")
-                source = context.user_data.get("nutrition_pending_source", "manual")
-                completed = await self._analyze_or_parse_text(
-                    update,
-                    context,
-                    f"{prior}\nУточнение пользователя: {text}",
-                    source=source,
-                )
-                if completed:
-                    context.user_data.pop("nutrition_pending_description", None)
-                    context.user_data.pop("nutrition_pending_source", None)
-                    context.user_data.pop("nutrition_pending_photo_file_id", None)
+                await self._apply_ai_clarification(update, context, text)
+            elif state == "draft_correction_text":
+                await self._apply_draft_correction(update, context, text)
+            elif state == "edit_draft_field":
+                await self._apply_draft_field_edit(update, context, text)
+            elif state == "draft":
+                await self._start_draft_correction(update, context, instruction=text)
             elif state == "edit_draft":
                 meal_id = int(context.user_data.get("nutrition_edit_meal_id"))
                 items = self.parse_structured_items(text)
@@ -1186,6 +1265,7 @@ class NutritionBotController:
                     client_telegram_id=update.effective_user.id,
                     meal_id=meal_id,
                     items=items,
+                    expected_version=context.user_data.get("nutrition_edit_version"),
                 )
                 await self._show_draft(update, context, meal)
             elif state == "wait_water":
@@ -1204,12 +1284,24 @@ class NutritionBotController:
                     client_telegram_id=update.effective_user.id,
                     code=text,
                 )
-                context.user_data.pop("nutrition_state", None)
+                self._clear(context)
+                context.user_data["nutrition_active"] = True
                 await update.message.reply_text(
-                    f"✅ Вы привязаны к тренеру {html.escape(link['trainer_display_name'])}.",
+                    f"✅ Вы подключены к тренеру {html.escape(link['trainer_display_name'])}.\n\n"
+                    "Тренер видит ваши подтвержденные записи и может оставлять комментарии. "
+                    "Дневные нормы задает тренер, бот сам их не назначает.\n\n"
+                    "Следующий шаг: добавьте прием пищи и проверьте новый черновик перед "
+                    "подтверждением.",
                     parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            "🍽️ Добавить прием пищи", callback_data="nutrition:add_meal"
+                        )],
+                        [InlineKeyboardButton(
+                            "🥗 В меню дневника", callback_data="nutrition:menu"
+                        )],
+                    ]),
                 )
-                await self._send_menu(update, context)
             elif state == "wait_timezone":
                 user = self.store.set_timezone(
                     telegram_id=update.effective_user.id,
@@ -1290,6 +1382,34 @@ class NutritionBotController:
             }
         context.user_data["nutrition_state"] = "nutrition_help_question"
 
+    @staticmethod
+    def _clear_help_session(context: ContextTypes.DEFAULT_TYPE) -> None:
+        for key in (
+            "nutrition_help_return",
+            "nutrition_help_history",
+            "nutrition_help_scope",
+        ):
+            context.user_data.pop(key, None)
+
+    @staticmethod
+    def _help_history(
+        context: ContextTypes.DEFAULT_TYPE,
+        help_context: NutritionHelpContext,
+    ) -> list[dict[str, str]]:
+        scope = {
+            "role": help_context.role,
+            "state": help_context.state,
+            "screen": help_context.screen,
+        }
+        if context.user_data.get("nutrition_help_scope") != scope:
+            context.user_data.pop("nutrition_help_history", None)
+        context.user_data["nutrition_help_scope"] = scope
+        history = context.user_data.get("nutrition_help_history")
+        if not isinstance(history, list):
+            history = []
+            context.user_data["nutrition_help_history"] = history
+        return history
+
     def _help_context(
         self,
         update: Update,
@@ -1308,6 +1428,9 @@ class NutritionBotController:
             "clarify_ai": "Уточнение черновика ИИ",
             "draft": "Черновик приема пищи",
             "edit_draft": "Исправление черновика",
+            "draft_correction_target": "Выбор блюда для исправления словами",
+            "draft_correction_text": "Исправление блюда обычной фразой",
+            "edit_draft_field": "Исправление одного поля блюда",
             "wait_water": "Добавление воды",
             "wait_link_code": "Привязка к тренеру",
             "wait_timezone": "Часовой пояс",
@@ -1371,6 +1494,17 @@ class NutritionBotController:
             if 0 <= step < len(self._PROFILE_FIELDS):
                 _, label, hint = self._PROFILE_FIELDS[step]
                 screen = f"Профиль: {label}, {hint}"
+        elif state == "edit_draft_field":
+            field = str(saved.get("nutrition_edit_field", ""))
+            labels = {
+                "name": "название",
+                "weight_g": "масса, г",
+                "calories": "калории всей порции, ккал",
+                "protein_g": "белки всей порции, г",
+                "fat_g": "жиры всей порции, г",
+                "carbs_g": "углеводы всей порции, г",
+            }
+            screen = f"Исправление блюда: {labels.get(field, 'одно поле')}"
         return NutritionHelpContext(role=role, state=state, screen=screen)
 
     @staticmethod
@@ -1386,6 +1520,7 @@ class NutritionBotController:
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         self._capture_help_return(context)
+        self._help_history(context, self._help_context(update, context))
         await self._reply(
             update,
             "❓ <b>Помощь по дневнику</b>\n\n"
@@ -1403,15 +1538,26 @@ class NutritionBotController:
     ) -> None:
         self._capture_help_return(context)
         help_context = self._help_context(update, context)
+        history = self._help_history(context, help_context)
         try:
             answer = await asyncio.wait_for(
-                asyncio.to_thread(self.help_service.answer, question, help_context),
+                asyncio.to_thread(
+                    self.help_service.answer,
+                    question,
+                    help_context,
+                    history=copy.deepcopy(history),
+                ),
                 timeout=float(getattr(self.help_service, "timeout_seconds", 12)) + 1,
             )
         except ValueError:
             raise
         except Exception:
             answer = self.help_service.fallback_answer(question, help_context)
+        history.append({
+            "question": sanitize_help_text(question).strip()[:900],
+            "answer": sanitize_help_text(answer).strip()[:1200],
+        })
+        del history[:-MAX_HISTORY_TURNS]
         context.user_data["nutrition_state"] = "nutrition_help_question"
         chunks = self._split_help_reply(answer)
         for index, chunk in enumerate(chunks):
@@ -1447,6 +1593,7 @@ class NutritionBotController:
         saved = context.user_data.get("nutrition_help_return")
         if not isinstance(saved, dict):
             state = context.user_data.get("nutrition_state")
+            self._clear_help_session(context)
             if state and state != "nutrition_help_question":
                 await self._reply(
                     update,
@@ -1659,6 +1806,66 @@ class NutritionBotController:
                 meal_id=int(context.user_data["nutrition_draft_meal_id"]),
             )
             await self._show_draft(update, context, meal)
+        elif state == "draft_correction_target":
+            meal_id = int(context.user_data["nutrition_correction_meal_id"])
+            meal = self.store.get_owned_draft(
+                client_telegram_id=update.effective_user.id,
+                meal_id=meal_id,
+            )
+            item_ids = context.user_data.get("nutrition_correction_item_ids") or []
+            if (
+                meal["version"] != context.user_data.get("nutrition_correction_version")
+                or [item["id"] for item in meal["items"]] != item_ids
+            ):
+                raise RuntimeError("version_conflict")
+            await self._reply(
+                update,
+                "Какое блюдо нужно исправить? Остальные позиции останутся без изменений.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        str(item["name"])[:50],
+                        callback_data=f"nutrition:correct_item:{meal_id}:{index}",
+                    )]
+                    for index, item in enumerate(meal["items"])
+                ] + [
+                    [InlineKeyboardButton("❓ Помощь по шагу", callback_data="nutrition:help")],
+                    [InlineKeyboardButton(
+                        "⬅️ К черновику", callback_data=f"nutrition:draft:{meal_id}"
+                    )],
+                ]),
+            )
+        elif state == "draft_correction_text":
+            meal_id = int(context.user_data["nutrition_correction_meal_id"])
+            meal = self.store.get_owned_draft(
+                client_telegram_id=update.effective_user.id,
+                meal_id=meal_id,
+            )
+            await self._prompt_draft_correction(update, context, meal)
+        elif state == "edit_draft_field":
+            meal_id = int(context.user_data["nutrition_edit_meal_id"])
+            item_index = int(context.user_data["nutrition_edit_item_index"])
+            meal = self.store.get_owned_draft(
+                client_telegram_id=update.effective_user.id,
+                meal_id=meal_id,
+            )
+            if (
+                meal["version"] != context.user_data.get("nutrition_edit_version")
+                or item_index < 0
+                or item_index >= len(meal["items"])
+                or meal["items"][item_index]["id"]
+                != context.user_data.get("nutrition_edit_item_id")
+            ):
+                raise RuntimeError("version_conflict")
+            await self._reply(
+                update,
+                self._draft_field_prompt(meal["items"][item_index], str(
+                    context.user_data["nutrition_edit_field"]
+                )),
+                parse_mode="HTML",
+                reply_markup=self._cancel_keyboard(
+                    f"nutrition:edit_item:{meal_id}:{item_index}"
+                ),
+            )
         elif state == "edit_draft":
             meal_id = int(context.user_data["nutrition_edit_meal_id"])
             await self._reply(
@@ -1677,13 +1884,13 @@ class NutritionBotController:
             await self._reply(
                 update,
                 "Введите код, который прислал ваш тренер:",
-                reply_markup=self._cancel_keyboard("nutrition:menu"),
+                reply_markup=self._cancel_keyboard("nutrition:settings"),
             )
         elif state == "wait_timezone":
             await self._reply(
                 update,
                 "Введите часовой пояс в формате IANA, например Europe/Moscow или Asia/Tokyo:",
-                reply_markup=self._cancel_keyboard("nutrition:menu"),
+                reply_markup=self._cancel_keyboard("nutrition:settings"),
             )
         elif state in {"manual_item", "manual_preview"}:
             await self._show_manual_step(
@@ -1795,8 +2002,12 @@ class NutritionBotController:
         *,
         source: str,
     ) -> bool:
-        if ";" in text:
+        try:
             items = self.parse_structured_items(text)
+        except ValueError:
+            if self._looks_like_manual_nutrition(text):
+                raise
+        else:
             await self._create_draft(update, context, items, source=source)
             return True
         if not self.ai.available:
@@ -1815,6 +2026,18 @@ class NutritionBotController:
             ) from exc
         return await self._accept_ai_result(update, context, result, source=source, description=text)
 
+    @staticmethod
+    def _looks_like_manual_nutrition(text: str) -> bool:
+        value = text.casefold()
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        return (
+            ";" in text
+            or "ккал" in value
+            or any(line.startswith("•") for line in lines)
+            or bool(re.search(r"(?:^|[\s,])[бжу]\s*[-+]?\d", value))
+            or len(lines) >= 6
+        )
+
     async def _accept_ai_result(
         self,
         update: Update,
@@ -1828,6 +2051,7 @@ class NutritionBotController:
         questions = result.get("questions") or []
         if questions:
             context.user_data["nutrition_state"] = "clarify_ai"
+            context.user_data["nutrition_pending_items"] = copy.deepcopy(result["items"])
             context.user_data["nutrition_pending_description"] = (
                 description or self._items_as_description(result["items"])
             )
@@ -1846,7 +2070,80 @@ class NutritionBotController:
             item["approximate"] = True
             items.append(item)
         await self._create_draft(update, context, items, source=source, photo_file_id=photo_file_id)
+        self._clear_ai_pending(context)
         return True
+
+    async def _apply_ai_clarification(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        answer: str,
+        *,
+        item_index: int | None = None,
+    ) -> None:
+        current_items = copy.deepcopy(context.user_data.get("nutrition_pending_items") or [])
+        if not current_items:
+            raise PermissionError("Исходный черновик для уточнения больше недоступен")
+        source = str(context.user_data.get("nutrition_pending_source", "manual"))
+        photo_file_id = context.user_data.get("nutrition_pending_photo_file_id")
+        context.user_data["nutrition_state"] = "clarify_ai"
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.ai.apply_clarification,
+                    answer,
+                    current_items,
+                    item_index=item_index,
+                ),
+                timeout=self.ai.timeout_seconds + 3,
+            )
+        except NutritionAITargetAmbiguous as exc:
+            nonce = self._new_flow_nonce()
+            context.user_data["nutrition_state"] = "clarify_ai_target"
+            context.user_data["nutrition_clarify_nonce"] = nonce
+            context.user_data["nutrition_pending_clarification"] = answer
+            await self._reply(
+                update,
+                "Какое блюдо исправить этим уточнением?",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        candidate["name"][:50],
+                        callback_data=(
+                            f"nutrition:clarify_item:{nonce}:{candidate['index']}"
+                        ),
+                    )]
+                    for candidate in exc.candidates
+                ] + [[InlineKeyboardButton(
+                    "Отмена", callback_data="nutrition:add_meal"
+                )]]),
+            )
+            return
+        except NutritionAIIntentAmbiguous as exc:
+            raise ValueError(str(exc)) from exc
+        except (NutritionAIUnavailable, asyncio.TimeoutError) as exc:
+            raise ValueError(
+                "ИИ не ответил. Уточнение сохранено, попробуйте отправить его еще раз."
+            ) from exc
+        await self._accept_ai_result(
+            update,
+            context,
+            result,
+            source=source,
+            photo_file_id=photo_file_id,
+            description=answer,
+        )
+
+    @staticmethod
+    def _clear_ai_pending(context: ContextTypes.DEFAULT_TYPE) -> None:
+        for key in (
+            "nutrition_pending_items",
+            "nutrition_pending_description",
+            "nutrition_pending_source",
+            "nutrition_pending_photo_file_id",
+            "nutrition_pending_clarification",
+            "nutrition_clarify_nonce",
+        ):
+            context.user_data.pop(key, None)
 
     async def _create_draft(
         self,
@@ -2534,7 +2831,10 @@ class NutritionBotController:
             update,
             f"✅ Вес {row['weight_kg']:g} кг сохранен.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⚖️ К весу", callback_data="nutrition:weight")]
+                [InlineKeyboardButton("⚖️ К весу", callback_data="nutrition:weight")],
+                [InlineKeyboardButton(
+                    "🥗 В меню дневника", callback_data="nutrition:menu"
+                )],
             ]),
         )
 
@@ -3068,7 +3368,10 @@ class NutritionBotController:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         meal: dict[str, Any],
+        *,
+        notice: str | None = None,
     ) -> None:
+        self._clear_draft_edit_context(context)
         context.user_data["nutrition_state"] = "draft"
         context.user_data["nutrition_draft_meal_id"] = meal["id"]
         moment = datetime.fromisoformat(meal["eaten_at"]).astimezone(ZoneInfo(meal["timezone"]))
@@ -3076,6 +3379,8 @@ class NutritionBotController:
             f"🍽️ <b>Черновик #{meal['id']}</b>",
             f"{html.escape(meal['meal_type'])}, {moment:%d.%m.%Y %H:%M}",
         ]
+        if notice:
+            lines.append(f"\n{html.escape(notice)}")
         lines.extend(self._meal_context_details(meal))
         approximate = False
         for item in meal["items"]:
@@ -3106,7 +3411,12 @@ class NutritionBotController:
                 "📝 Контекст приема", callback_data=f"nutrition:meal_context:{meal['id']}"
             )],
             [InlineKeyboardButton(confirm_label, callback_data=f"nutrition:confirm:{meal['id']}")],
-            [InlineKeyboardButton("✏️ Исправить вручную", callback_data=f"nutrition:edit:{meal['id']}")],
+            [InlineKeyboardButton(
+                "✨ Исправить словами", callback_data=f"nutrition:correct:{meal['id']}"
+            )],
+            [InlineKeyboardButton(
+                "✏️ Исправить поле", callback_data=f"nutrition:edit:{meal['id']}"
+            )],
             [InlineKeyboardButton("❓ Помощь по шагу", callback_data="nutrition:help")],
             [InlineKeyboardButton("Отменить", callback_data=f"nutrition:cancel:{meal['id']}")],
         ])
@@ -3117,30 +3427,446 @@ class NutritionBotController:
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
+    async def _start_draft_correction(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        meal_id: int | None = None,
+        instruction: str | None = None,
+    ) -> None:
+        selected_meal_id = int(
+            meal_id or context.user_data.get("nutrition_draft_meal_id", 0)
+        )
+        meal = self.store.get_owned_draft(
+            client_telegram_id=update.effective_user.id,
+            meal_id=selected_meal_id,
+        )
+        if not self.ai.available:
+            raise ValueError(
+                "Исправление обычной фразой временно недоступно. "
+                "Используйте «Исправить поле»."
+            )
+        context.user_data["nutrition_correction_meal_id"] = selected_meal_id
+        context.user_data["nutrition_correction_version"] = meal["version"]
+        context.user_data["nutrition_correction_item_ids"] = [
+            item["id"] for item in meal["items"]
+        ]
+        if instruction:
+            context.user_data["nutrition_correction_instruction"] = instruction
+        if len(meal["items"]) > 1:
+            context.user_data["nutrition_state"] = "draft_correction_target"
+            await self._reply(
+                update,
+                "Какое блюдо нужно исправить? Остальные позиции останутся без изменений.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        str(item["name"])[:50],
+                        callback_data=f"nutrition:correct_item:{selected_meal_id}:{index}",
+                    )]
+                    for index, item in enumerate(meal["items"])
+                ] + [
+                    [InlineKeyboardButton("❓ Помощь по шагу", callback_data="nutrition:help")],
+                    [InlineKeyboardButton(
+                        "⬅️ К черновику", callback_data=f"nutrition:draft:{selected_meal_id}"
+                    )],
+                ]),
+            )
+            return
+        context.user_data["nutrition_correction_index"] = 0
+        context.user_data["nutrition_correction_item_id"] = meal["items"][0]["id"]
+        if instruction:
+            await self._apply_draft_correction(update, context, instruction)
+            return
+        await self._prompt_draft_correction(update, context, meal)
+
+    async def _choose_draft_correction_item(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        meal_id: int,
+        item_index: int,
+    ) -> None:
+        if (
+            context.user_data.get("nutrition_state") != "draft_correction_target"
+            or int(context.user_data.get("nutrition_correction_meal_id", 0)) != meal_id
+        ):
+            raise PermissionError("Этот выбор блюда уже устарел")
+        meal = self.store.get_owned_draft(
+            client_telegram_id=update.effective_user.id,
+            meal_id=meal_id,
+        )
+        if item_index < 0 or item_index >= len(meal["items"]):
+            raise PermissionError("Выбранное блюдо больше недоступно")
+        item_ids = context.user_data.get("nutrition_correction_item_ids") or []
+        if (
+            meal["version"] != context.user_data.get("nutrition_correction_version")
+            or item_index >= len(item_ids)
+            or meal["items"][item_index]["id"] != item_ids[item_index]
+        ):
+            raise RuntimeError("version_conflict")
+        context.user_data["nutrition_correction_index"] = item_index
+        context.user_data["nutrition_correction_item_id"] = meal["items"][item_index]["id"]
+        instruction = str(context.user_data.get("nutrition_correction_instruction", ""))
+        if instruction:
+            await self._apply_draft_correction(update, context, instruction)
+            return
+        await self._prompt_draft_correction(update, context, meal)
+
+    async def _prompt_draft_correction(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        meal: dict[str, Any],
+    ) -> None:
+        index = int(context.user_data.get("nutrition_correction_index", 0))
+        item = meal["items"][index]
+        context.user_data["nutrition_state"] = "draft_correction_text"
+        await self._reply(
+            update,
+            f"Что исправить в позиции «{html.escape(item['name'])}»? "
+            "Напишите обычной фразой, например: «Это гречневые хлопья с семенами "
+            "и кедровыми орехами, 294 г».",
+            parse_mode="HTML",
+            reply_markup=self._cancel_keyboard(f"nutrition:draft:{meal['id']}"),
+        )
+
+    async def _apply_draft_correction(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        instruction: str,
+    ) -> None:
+        meal_id = int(context.user_data.get("nutrition_correction_meal_id", 0))
+        item_index = int(context.user_data.get("nutrition_correction_index", 0))
+        meal = self.store.get_owned_draft(
+            client_telegram_id=update.effective_user.id,
+            meal_id=meal_id,
+        )
+        if item_index < 0 or item_index >= len(meal["items"]):
+            raise PermissionError("Выбранное блюдо больше недоступно")
+        context.user_data["nutrition_state"] = "draft_correction_text"
+        context.user_data["nutrition_correction_instruction"] = instruction
+        if (
+            meal["version"] != context.user_data.get("nutrition_correction_version")
+            or meal["items"][item_index]["id"]
+            != context.user_data.get("nutrition_correction_item_id")
+        ):
+            await self._show_stale_draft_correction(
+                update, context, meal_id=meal_id, instruction=instruction
+            )
+            return
+        try:
+            replacement = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.ai.correct_draft_item,
+                    instruction,
+                    copy.deepcopy(meal["items"]),
+                    item_index,
+                ),
+                timeout=self.ai.timeout_seconds + 3,
+            )
+        except (NutritionAIUnavailable, asyncio.TimeoutError) as exc:
+            raise ValueError(
+                "ИИ не ответил. Исправление сохранено, попробуйте отправить его еще раз."
+            ) from exc
+        revised = [dict(item) for item in meal["items"]]
+        revised[item_index] = dict(replacement)
+        revised[item_index].pop("id", None)
+        try:
+            updated = self.store.replace_draft_items(
+                client_telegram_id=update.effective_user.id,
+                meal_id=meal_id,
+                items=revised,
+                expected_version=meal["version"],
+            )
+        except RuntimeError as exc:
+            if str(exc) != "version_conflict":
+                raise
+            await self._show_stale_draft_correction(
+                update, context, meal_id=meal_id, instruction=instruction
+            )
+            return
+        self._clear_draft_edit_context(context)
+        await self._show_draft(
+            update,
+            context,
+            updated,
+            notice="Блюдо заменено по вашему уточнению. Проверьте новый расчет.",
+        )
+
+    async def _show_stale_draft_correction(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        meal_id: int,
+        instruction: str,
+    ) -> None:
+        fresh = self.store.get_owned_draft(
+            client_telegram_id=update.effective_user.id,
+            meal_id=meal_id,
+        )
+        await self._show_draft(
+            update,
+            context,
+            fresh,
+            notice=(
+                "Черновик изменился, пока готовилось исправление. Оно не применено. "
+                f"Повторите сохраненный текст: «{instruction[:500]}»."
+            ),
+        )
+        context.user_data["nutrition_stale_correction_instruction"] = instruction
+
+    async def _show_draft_item_picker(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        meal_id: int,
+    ) -> None:
+        meal = self.store.get_owned_draft(
+            client_telegram_id=update.effective_user.id,
+            meal_id=meal_id,
+        )
+        if len(meal["items"]) == 1:
+            await self._show_draft_field_picker(update, context, meal_id, 0)
+            return
+        buttons = [
+            [InlineKeyboardButton(
+                str(item["name"])[:50],
+                callback_data=f"nutrition:edit_item:{meal_id}:{index}",
+            )]
+            for index, item in enumerate(meal["items"])
+        ]
+        buttons.extend([
+            [InlineKeyboardButton(
+                "⌨️ Заменить все полным вводом", callback_data=f"nutrition:edit_full:{meal_id}"
+            )],
+            [InlineKeyboardButton("❓ Помощь по шагу", callback_data="nutrition:help")],
+            [InlineKeyboardButton("⬅️ К черновику", callback_data=f"nutrition:draft:{meal_id}")],
+        ])
+        await update.callback_query.edit_message_text(
+            "Выберите блюдо. Остальные позиции и их значения сохранятся.",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    async def _show_draft_field_picker(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        meal_id: int,
+        item_index: int,
+    ) -> None:
+        meal = self.store.get_owned_draft(
+            client_telegram_id=update.effective_user.id,
+            meal_id=meal_id,
+        )
+        if item_index < 0 or item_index >= len(meal["items"]):
+            raise PermissionError("Выбранное блюдо больше недоступно")
+        item = meal["items"][item_index]
+        fields = [
+            ("name", "Название"),
+            ("weight_g", "Масса, г"),
+        ]
+        if item.get("calculation_method") != "reference":
+            fields.extend([
+                ("calories", "Калории, ккал"),
+                ("protein_g", "Белки, г"),
+                ("fat_g", "Жиры, г"),
+                ("carbs_g", "Углеводы, г"),
+            ])
+        buttons = [
+            [InlineKeyboardButton(
+                label,
+                callback_data=f"nutrition:edit_field:{meal_id}:{item_index}:{field}",
+            )]
+            for field, label in fields
+        ]
+        buttons.extend([
+            [InlineKeyboardButton(
+                "⌨️ Заменить все полным вводом", callback_data=f"nutrition:edit_full:{meal_id}"
+            )],
+            [InlineKeyboardButton("❓ Помощь по шагу", callback_data="nutrition:help")],
+            [InlineKeyboardButton("⬅️ К черновику", callback_data=f"nutrition:draft:{meal_id}")],
+        ])
+        await self._reply(
+            update,
+            f"Что исправить в позиции «{html.escape(item['name'])}»?",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    async def _start_draft_field_edit(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        meal_id: int,
+        item_index: int,
+        field: str,
+    ) -> None:
+        labels = {
+            "name": "название",
+            "weight_g": "массу в граммах",
+            "calories": "калории всей порции, ккал",
+            "protein_g": "белки всей порции, г",
+            "fat_g": "жиры всей порции, г",
+            "carbs_g": "углеводы всей порции, г",
+        }
+        if field not in labels:
+            raise ValueError("Неизвестное поле блюда")
+        meal = self.store.get_owned_draft(
+            client_telegram_id=update.effective_user.id,
+            meal_id=meal_id,
+        )
+        if item_index < 0 or item_index >= len(meal["items"]):
+            raise PermissionError("Выбранное блюдо больше недоступно")
+        context.user_data.update({
+            "nutrition_state": "edit_draft_field",
+            "nutrition_edit_meal_id": meal_id,
+            "nutrition_edit_item_index": item_index,
+            "nutrition_edit_field": field,
+            "nutrition_edit_version": meal["version"],
+            "nutrition_edit_item_id": meal["items"][item_index]["id"],
+        })
+        await self._reply(
+            update,
+            f"Введите {labels[field]} для «{html.escape(meal['items'][item_index]['name'])}»:",
+            parse_mode="HTML",
+            reply_markup=self._cancel_keyboard(
+                f"nutrition:edit_item:{meal_id}:{item_index}"
+            ),
+        )
+
+    @staticmethod
+    def _draft_field_prompt(item: dict[str, Any], field: str) -> str:
+        labels = {
+            "name": "название",
+            "weight_g": "массу в граммах",
+            "calories": "калории всей порции, ккал",
+            "protein_g": "белки всей порции, г",
+            "fat_g": "жиры всей порции, г",
+            "carbs_g": "углеводы всей порции, г",
+        }
+        if field not in labels:
+            raise ValueError("Неизвестное поле блюда")
+        return f"Введите {labels[field]} для блюда {html.escape(str(item['name']))}:"
+
+    async def _apply_draft_field_edit(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        value: str,
+    ) -> None:
+        meal_id = int(context.user_data.get("nutrition_edit_meal_id", 0))
+        item_index = int(context.user_data.get("nutrition_edit_item_index", -1))
+        field = str(context.user_data.get("nutrition_edit_field", ""))
+        meal = self.store.get_owned_draft(
+            client_telegram_id=update.effective_user.id,
+            meal_id=meal_id,
+        )
+        if item_index < 0 or item_index >= len(meal["items"]):
+            raise PermissionError("Выбранное блюдо больше недоступно")
+        if (
+            meal["version"] != context.user_data.get("nutrition_edit_version")
+            or meal["items"][item_index]["id"]
+            != context.user_data.get("nutrition_edit_item_id")
+        ):
+            raise RuntimeError("version_conflict")
+        revised = [dict(item) for item in meal["items"]]
+        notice = "Поле исправлено. Остальные значения сохранены."
+        if field == "name":
+            clean = value.strip()
+            if not clean:
+                raise ValueError("Название блюда не может быть пустым")
+            revised[item_index][field] = clean
+        elif field == "weight_g":
+            new_weight = self._positive_number(
+                value, "Масса", maximum=100000
+            )
+            current_item = revised[item_index]
+            old_weight = current_item.get("weight_g")
+            if current_item.get("calculation_method") != "reference":
+                if old_weight is None or float(old_weight) <= 0:
+                    raise ValueError(
+                        "У блюда нет исходной массы для пропорционального пересчета. "
+                        "Уточните КБЖУ или используйте исправление словами."
+                    )
+                ratio = float(new_weight) / float(old_weight)
+                for nutrient in ("calories", "protein_g", "fat_g", "carbs_g"):
+                    current_item[nutrient] = round(
+                        float(current_item[nutrient]) * ratio, 6
+                    )
+            current_item["weight_g"] = new_weight
+            notice = (
+                "Масса исправлена. КБЖУ пересчитаны для новой порции; "
+                "остальные блюда сохранены."
+            )
+        elif field in {"calories", "protein_g", "fat_g", "carbs_g"}:
+            revised[item_index][field] = self._nonnegative_number(
+                value, "Значение", maximum=100000
+            )
+        else:
+            raise ValueError("Неизвестное поле блюда")
+        updated = self.store.replace_draft_items(
+            client_telegram_id=update.effective_user.id,
+            meal_id=meal_id,
+            items=revised,
+            expected_version=meal["version"],
+        )
+        self._clear_draft_edit_context(context)
+        await self._show_draft(
+            update,
+            context,
+            updated,
+            notice=notice,
+        )
+
+    @staticmethod
+    def _clear_draft_edit_context(context: ContextTypes.DEFAULT_TYPE) -> None:
+        for key in (
+            "nutrition_correction_meal_id",
+            "nutrition_correction_index",
+            "nutrition_correction_instruction",
+            "nutrition_correction_version",
+            "nutrition_correction_item_ids",
+            "nutrition_correction_item_id",
+            "nutrition_stale_correction_instruction",
+            "nutrition_edit_meal_id",
+            "nutrition_edit_item_index",
+            "nutrition_edit_field",
+            "nutrition_edit_version",
+            "nutrition_edit_item_id",
+        ):
+            context.user_data.pop(key, None)
+
     async def _send_menu(
         self,
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         *,
         edit: bool = False,
+        first_visit: bool = False,
     ) -> None:
         buttons = [
             [InlineKeyboardButton("🍽️ Добавить прием пищи", callback_data="nutrition:add_meal")],
-            [InlineKeyboardButton("💧 Добавить воду", callback_data="nutrition:water")],
-            [InlineKeyboardButton("⏰ Напоминания", callback_data="nutrition:reminders")],
             [
-                InlineKeyboardButton("👤 Профиль", callback_data="nutrition:profile"),
-                InlineKeyboardButton("⚖️ Вес", callback_data="nutrition:weight"),
+                InlineKeyboardButton("💧 Добавить воду", callback_data="nutrition:water"),
+                InlineKeyboardButton("⚖️ Записать вес", callback_data="nutrition:weight"),
             ],
             [
                 InlineKeyboardButton("📊 Сегодня", callback_data="nutrition:today"),
                 InlineKeyboardButton("📅 Неделя", callback_data="nutrition:week"),
             ],
-            [InlineKeyboardButton("🔗 Ввести код тренера", callback_data="nutrition:link")],
-            [InlineKeyboardButton("🕒 Часовой пояс", callback_data="nutrition:timezone")],
-            [InlineKeyboardButton("Отозвать согласие на фото", callback_data="nutrition:consent_revoke")],
-            [InlineKeyboardButton("Отключить тренера", callback_data="nutrition:unlink")],
+            [
+                InlineKeyboardButton("🔁 Повторить прием", callback_data="nutrition:repeat"),
+                InlineKeyboardButton("💬 Комментарии", callback_data="nutrition:comments"),
+            ],
+            [InlineKeyboardButton("⚙️ Настройки", callback_data="nutrition:settings")],
         ]
+        if first_visit:
+            buttons.insert(1, [InlineKeyboardButton(
+                "🔗 У меня есть код тренера", callback_data="nutrition:link"
+            )])
         if self.is_trainer(update.effective_user.id):
             buttons.append([InlineKeyboardButton("👥 Кабинет тренера", callback_data="nutrition:trainer")])
         if self.dashboard_origin:
@@ -3149,16 +3875,125 @@ class NutritionBotController:
             ])
         buttons.append([InlineKeyboardButton("❓ Помощь", callback_data="nutrition:help")])
         buttons.append([InlineKeyboardButton("Закрыть дневник", callback_data="nutrition:leave")])
-        text = (
-            "🥗 <b>Дневник питания</b>\n\n"
-            "Фото и текст создают черновик. Оценка ИИ приблизительная и требует "
-            "вашего подтверждения. Бот не делает медицинских назначений."
-        )
+        if first_visit:
+            text = (
+                "🥗 <b>Дневник питания</b>\n\n"
+                "Первый шаг: добавьте прием пищи. Бот создаст черновик, который можно "
+                "исправить и нужно подтвердить.\n\n"
+                "Если подключить тренера, он увидит только ваши подтвержденные записи, "
+                "сможет оставить комментарий. Дневные нормы задает тренер, бот сам их не "
+                "назначает."
+            )
+        else:
+            text = (
+                "🥗 <b>Дневник питания</b>\n\n"
+                "Фото и текст создают черновик. Оценка ИИ приблизительная и требует "
+                "вашего подтверждения. Бот не делает медицинских назначений."
+            )
         markup = InlineKeyboardMarkup(buttons)
         if edit and update.callback_query:
             await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=markup)
         else:
             await self._reply(update, text, parse_mode="HTML", reply_markup=markup)
+
+    async def _show_settings(self, update: Update) -> None:
+        buttons = [
+            [InlineKeyboardButton("👤 Профиль", callback_data="nutrition:profile")],
+            [InlineKeyboardButton("⏰ Напоминания", callback_data="nutrition:reminders")],
+            [InlineKeyboardButton("🔗 Ввести код тренера", callback_data="nutrition:link")],
+            [InlineKeyboardButton("🕒 Часовой пояс", callback_data="nutrition:timezone")],
+            [InlineKeyboardButton(
+                "Отозвать согласие на фото", callback_data="nutrition:consent_revoke"
+            )],
+            [InlineKeyboardButton("Отключить тренера", callback_data="nutrition:unlink")],
+            [InlineKeyboardButton("⬅️ В меню дневника", callback_data="nutrition:menu")],
+        ]
+        await update.callback_query.edit_message_text(
+            "⚙️ <b>Настройки дневника</b>\n\n"
+            "Здесь находятся профиль, напоминания, связь с тренером и параметры времени.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    async def _show_own_trainer_comments(self, update: Update) -> None:
+        comments = self.store.list_own_trainer_comments(
+            client_telegram_id=update.effective_user.id,
+            limit=20,
+        )
+        back = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ В меню дневника", callback_data="nutrition:menu")]
+        ])
+        if not comments:
+            await update.callback_query.edit_message_text(
+                "💬 Пока нет комментариев тренера к вашим подтвержденным приемам.",
+                reply_markup=back,
+            )
+            return
+
+        blocks = ["💬 Последние комментарии тренера"]
+        for comment in comments:
+            meal = comment["meal"]
+            trainer_name = str(comment.get("trainer_display_name") or "Тренер")
+            if re.fullmatch(r"User\s+\d+", trainer_name, flags=re.IGNORECASE):
+                trainer_name = "Тренер"
+            created = datetime.fromisoformat(comment["created_at"])
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            local = created.astimezone(ZoneInfo(meal["timezone"]))
+            meal_moment = datetime.fromisoformat(meal["eaten_at"]).astimezone(
+                ZoneInfo(meal["timezone"])
+            )
+            blocks.append(
+                f"{trainer_name}, комментарий {local:%d.%m.%Y %H:%M}\n"
+                f"К приему «{meal['meal_type']}» {meal_moment:%d.%m.%Y %H:%M}\n"
+                f"{comment['text']}"
+            )
+        chunks = self._split_help_reply("\n\n".join(blocks))
+        for index, chunk in enumerate(chunks):
+            kwargs: dict[str, Any] = {"parse_mode": "HTML"}
+            if index == len(chunks) - 1:
+                kwargs["reply_markup"] = back
+            if index == 0:
+                await update.callback_query.edit_message_text(html.escape(chunk), **kwargs)
+            else:
+                await update.callback_query.message.reply_text(html.escape(chunk), **kwargs)
+
+    async def _show_repeat_picker(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        nonce = self._new_flow_nonce()
+        context.user_data["nutrition_repeat_attempt"] = {
+            "nonce": nonce,
+            "eaten_at": datetime.now(timezone.utc).isoformat(),
+        }
+        meals = self.store.list_own_recent_meals(
+            client_telegram_id=update.effective_user.id,
+            limit=10,
+        )
+        buttons = [
+            [InlineKeyboardButton(
+                self._meal_button_label(meal),
+                callback_data=f"nutrition:repeat_meal:{nonce}:{meal['id']}",
+            )]
+            for meal in meals
+        ]
+        buttons.append([
+            InlineKeyboardButton("⬅️ В меню дневника", callback_data="nutrition:menu")
+        ])
+        message = (
+            "🔁 <b>Повторить прием</b>\n\n"
+            "Выберите подтвержденный прием. Бот создаст из него новый черновик на "
+            "текущее время. До подтверждения можно исправить массу, дату и время."
+            if meals
+            else "🔁 Пока нет подтвержденных приемов для повтора."
+        )
+        await update.callback_query.edit_message_text(
+            message,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
 
     async def _show_trainer_clients(self, update: Update) -> None:
         clients = self.store.list_trainer_clients(update.effective_user.id)
@@ -3453,41 +4288,7 @@ class NutritionBotController:
 
     @staticmethod
     def parse_structured_items(text: str) -> list[dict[str, Any]]:
-        items = []
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            parts = [part.strip() for part in line.split(";")]
-            if len(parts) != 6:
-                raise ValueError(
-                    "В каждой строке нужно 6 полей: название; масса/порция; ккал; Б; Ж; У"
-                )
-            name, portion_raw, calories, protein, fat, carbs = parts
-            try:
-                weight = float(portion_raw.replace(",", "."))
-                portion_text = ""
-                approximate = False
-            except ValueError:
-                weight = None
-                portion_text = portion_raw
-                approximate = True
-            if weight is None and not portion_text:
-                raise ValueError(f"Нужна масса или порция для блюда {name}")
-            items.append(
-                {
-                    "name": name,
-                    "weight_g": weight,
-                    "portion_text": portion_text,
-                    "calories": float(calories.replace(",", ".")),
-                    "protein_g": float(protein.replace(",", ".")),
-                    "fat_g": float(fat.replace(",", ".")),
-                    "carbs_g": float(carbs.replace(",", ".")),
-                    "approximate": approximate,
-                }
-            )
-        if not items:
-            raise ValueError("Нужен хотя бы один продукт или блюдо")
-        return items
+        return parse_manual_items(text)
 
     @staticmethod
     def parse_norms(text: str) -> tuple[str, dict[str, Any]]:
@@ -3642,8 +4443,9 @@ class NutritionBotController:
     @staticmethod
     def _manual_prompt() -> str:
         return (
-            "Опишите еду обычным текстом. Также можно ввести точно, каждое блюдо с новой строки:\n"
-            "Название; масса в г или описание порции; ккал; белки; жиры; углеводы"
+            "Можно вставить строку или весь черновик из бота. Для одного блюда также "
+            "подойдет 6 строк: название, масса в г, ккал, белки, жиры, углеводы. "
+            "Прежний формат с точкой с запятой тоже поддерживается."
         )
 
     @staticmethod

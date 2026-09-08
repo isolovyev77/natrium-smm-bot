@@ -1,3 +1,4 @@
+import json
 import re
 import subprocess
 import tempfile
@@ -134,6 +135,89 @@ class NutritionDashboardFrontendTests(unittest.TestCase):
         self.assertIn('name:"calories",type:"number",min:"0",step:"0.1",required:true', self.script)
         self.assertIn('name:"weight_g",type:"number",min:"0.1",step:"0.1",required:true', self.script)
         self.assertNotIn('weight_g:d.weight_g===""?null:Number(d.weight_g)', self.script)
+
+    def test_guided_repeat_comments_and_empty_day_navigation_are_present(self):
+        for route in (
+            "/api/me/trainer-comments?limit=20",
+            "/api/me/meals/recent?limit=10",
+            "/api/me/meals/{meal}/repeat",
+        ):
+            self.assertIn(route, self.script)
+        for text in (
+            "Последние комментарии тренера",
+            "Перейти к записи",
+            "Первый шаг на этот день",
+            "Последние приёмы",
+            "Посмотреть неделю",
+            "Продолжить к подтверждению",
+            "До подтверждения черновик не входит",
+        ):
+            self.assertIn(text, self.script)
+        self.assertIn("state.session.today", self.script)
+        self.assertIn("repeatMealDialog", self.script)
+        self.assertIn("formMutation(f,key=>api(path(\"repeatMeal\"", self.script)
+
+    def test_food_check_preserves_and_explains_provenance(self):
+        for text in (
+            "Проверка еды",
+            "ИИ, приблизительно",
+            "Справочник",
+            "Вручную",
+            "Масса:",
+            "Порция:",
+            "Оценка ИИ приблизительна",
+            "Значения введены вручную и не проверяются автоматически",
+        ):
+            self.assertIn(text, self.script)
+        self.assertIn("id:i.id", self.script)
+        self.assertIn("item_${index}_portion_text", self.script)
+
+    def test_mass_change_recalculates_manual_and_reference_macros(self):
+        start = self.script.index("const mealMacroKeys=")
+        end = self.script.index("function foodCheck", start)
+        helpers = self.script[start:end]
+        cases = [
+            {
+                "weight_g": 150,
+                "calories": 400,
+                "protein_g": 12,
+                "fat_g": 18,
+                "carbs_g": 50,
+                "calculation_method": "ai",
+                "approximate": True,
+            },
+            {
+                "weight_g": 100,
+                "calculation_method": "reference",
+                "reference_kcal_per_100g": 89,
+                "reference_protein_per_100g": 1.1,
+                "reference_fat_per_100g": 0.3,
+                "reference_carbs_per_100g": 22.8,
+            },
+        ]
+        program = (
+            helpers
+            + "\nconsole.log(JSON.stringify(["
+            + f"mealMacrosForWeight({json.dumps(cases[0])},294),"
+            + f"mealMacrosForWeight({json.dumps(cases[1])},150)"
+            + "]));"
+        )
+        result = subprocess.run(
+            ["node", "-e", program], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manual, reference = json.loads(result.stdout)
+        self.assertEqual(
+            manual,
+            {"calories": 784, "protein_g": 23.52, "fat_g": 35.28, "carbs_g": 98},
+        )
+        self.assertEqual(
+            reference,
+            {"calories": 133.5, "protein_g": 1.65, "fat_g": 0.45, "carbs_g": 34.2},
+        )
+        self.assertIn("manuallyEditedMacros", self.script)
+        self.assertIn('readOnly:reference', self.script)
+        self.assertIn("исходной записи не указана масса", self.script)
 
     def test_profile_timezone_refreshes_session_without_moving_historical_date(self):
         self.assertIn("wasToday=state.date===state.session.today", self.script)

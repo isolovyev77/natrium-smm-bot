@@ -432,3 +432,83 @@ def test_confirm_rejects_stale_preview_then_accepts_fresh_version_and_replay(tmp
     )
     assert fresh[0] == replay[0] == 200
     assert json.loads(fresh[2])["data"] == json.loads(replay[2])["data"]
+
+
+def test_guided_ux_comment_recent_and_repeat_routes(tmp_path):
+    store, _ = prepared_store(tmp_path)
+    draft = store.create_meal_draft(
+        client_telegram_id=CLIENT_1,
+        source="manual",
+        eaten_at="2026-09-07T08:00:00+03:00",
+        meal_type="breakfast",
+        mood="good",
+        items=[{
+            "name": "Каша",
+            "weight_g": 250,
+            "portion_text": "тарелка",
+            "calories": 320,
+            "protein_g": 10,
+            "fat_g": 8,
+            "carbs_g": 52,
+        }],
+    )
+    meal = store.confirm_meal(
+        client_telegram_id=CLIENT_1,
+        meal_id=draft["id"],
+        idempotency_key="guided-confirm",
+    )
+    store.add_comment(TRAINER_1, meal["id"], "Хороший завтрак")
+
+    comments = request(
+        store,
+        "GET",
+        "/api/me/trainer-comments?limit=5",
+        init_data=signed_init_data(CLIENT_1),
+    )
+    assert comments[0] == 200
+    comment = json.loads(comments[2])["data"][0]
+    assert comment["text"] == "Хороший завтрак"
+    assert comment["meal"] == {
+        "id": meal["id"],
+        "eaten_at": meal["eaten_at"],
+        "local_date": "2026-09-07",
+        "timezone": "Europe/Moscow",
+        "meal_type": "breakfast",
+    }
+
+    recent = request(
+        store,
+        "GET",
+        "/api/me/meals/recent?limit=5",
+        init_data=signed_init_data(CLIENT_1),
+    )
+    assert recent[0] == 200
+    assert json.loads(recent[2])["data"][0]["id"] == meal["id"]
+
+    headers = {"Idempotency-Key": "repeat-http-one"}
+    payload = {"eaten_at": "2026-09-08T09:30:00+03:00"}
+    first = request(
+        store,
+        "POST",
+        f"/api/me/meals/{meal['id']}/repeat",
+        init_data=signed_init_data(CLIENT_1),
+        payload=payload,
+        headers=headers,
+    )
+    replay = request(
+        store,
+        "POST",
+        f"/api/me/meals/{meal['id']}/repeat",
+        init_data=signed_init_data(CLIENT_1),
+        payload=payload,
+        headers=headers,
+    )
+    assert first[0] == replay[0] == 201
+    repeated = json.loads(first[2])["data"]
+    assert json.loads(replay[2])["data"]["id"] == repeated["id"]
+    assert repeated["status"] == "draft"
+    assert repeated["mood"] is None
+    assert repeated["comments"] == []
+    assert store.get_own_day(
+        client_telegram_id=CLIENT_1, local_date="2026-09-08"
+    )["meals"] == []

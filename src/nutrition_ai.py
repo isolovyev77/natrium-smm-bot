@@ -12,6 +12,7 @@ import base64
 import json
 import math
 import os
+import re
 from typing import Any
 
 
@@ -21,6 +22,21 @@ class NutritionAIUnavailable(RuntimeError):
 
 class NutritionAIResponseError(ValueError):
     """Модель вернула ответ, который нельзя безопасно показать как черновик."""
+
+
+class NutritionAITargetAmbiguous(ValueError):
+    """Для исправления нужно явно выбрать одну из нескольких позиций."""
+
+    def __init__(self, items: list[dict[str, Any]]):
+        self.candidates = tuple(
+            {"index": index, "name": str(item.get("name", "")).strip() or f"Позиция {index + 1}"}
+            for index, item in enumerate(items)
+        )
+        super().__init__("Выберите блюдо, которое нужно исправить")
+
+
+class NutritionAIIntentAmbiguous(ValueError):
+    """Фраза может означать и дополнение, и уточнение текущей позиции."""
 
 
 class NutritionAI:
@@ -39,6 +55,27 @@ class NutritionAI:
     """
 
     MAX_IMAGE_BYTES = 12 * 1024 * 1024
+    _FOOD_FIELDS = (
+        "name",
+        "weight_g",
+        "portion_text",
+        "calories",
+        "protein_g",
+        "fat_g",
+        "carbs_g",
+        "approximate",
+    )
+    _ADD_COMMANDS = frozenset({"добавь", "добавить", "добавьте"})
+    _AMBIGUOUS_ADD_WORDS = frozenset({"еще", "ещё"})
+    _GRAMS_PATTERN = re.compile(
+        r"(?<![\w.,+\-])([-+]?(?:\d+(?:[.,]\d+)?|nan|inf(?:inity)?))"
+        r"\s*(?:г|гр|грамм|грамма|граммов)\b",
+        re.IGNORECASE,
+    )
+    _MASS_ONLY_PATTERN = re.compile(
+        r"\s*(?:масса\s*)?(\d+(?:[.,]\d+)?)\s*(?:г|гр|грамм|грамма|граммов)\s*[.!]?\s*",
+        re.IGNORECASE,
+    )
 
     def __init__(
         self,
@@ -109,6 +146,208 @@ class NutritionAI:
             f"Описание пользователя: {description}"
         )
         return self._request([{"type": "input_text", "text": prompt}])
+
+    def apply_clarification(
+        self,
+        answer: str,
+        current_items: list[dict[str, Any]],
+        *,
+        item_index: int | None = None,
+    ) -> dict[str, Any]:
+        """Применить ответ на AI-уточнение к исходным гипотезам.
+
+        Обычный ответ исправляет выбранную позицию. Только явная команда
+        ``добавь``/``добавить`` добавляет новые позиции. Это не даёт ответу
+        вида ``Это гречневые хлопья...`` сохраниться рядом со старой ошибочной
+        гипотезой. Фраза ``а ещё ...`` остаётся неоднозначной и должна быть
+        уточнена контроллером.
+        """
+        answer = self._validate_instruction(answer)
+        items = self._copy_current_items(current_items)
+        intent = self._clarification_intent(answer)
+        if intent == "ambiguous":
+            raise NutritionAIIntentAmbiguous(
+                "Уточните: добавить ещё одно блюдо или исправить текущее?"
+            )
+        if intent == "append":
+            addition = self.analyze_text(answer)
+            appended = [self._mark_ai_item(item) for item in addition["items"]]
+            return {
+                "items": items + appended,
+                "questions": list(addition.get("questions") or []),
+                "operation": "append",
+                "target_index": None,
+            }
+
+        target_index = self._resolve_target_index(items, item_index)
+        self._explicit_weight_grams(answer)
+        correction = self._request_item_correction(
+            answer,
+            items[target_index],
+        )
+        replacement = self._finalize_replacement(
+            correction["items"],
+            instruction=answer,
+            original=items[target_index],
+        )
+        revised = list(items)
+        revised[target_index] = replacement
+        return {
+            "items": revised,
+            "questions": list(correction.get("questions") or []),
+            "operation": "replace",
+            "target_index": target_index,
+        }
+
+    def correct_draft_item(
+        self,
+        instruction: str,
+        current_items: list[dict[str, Any]],
+        item_index: int | None = None,
+    ) -> dict[str, Any]:
+        """Вернуть одну AI-позицию для замены выбранного блюда черновика."""
+        instruction = self._validate_instruction(instruction)
+        items = self._copy_current_items(current_items)
+        target_index = self._resolve_target_index(items, item_index)
+        self._explicit_weight_grams(instruction)
+        correction = self._request_item_correction(
+            instruction,
+            items[target_index],
+        )
+        if correction.get("questions"):
+            raise NutritionAIResponseError("Для исправления блюда нужно дополнительное уточнение")
+        return self._finalize_replacement(
+            correction["items"],
+            instruction=instruction,
+            original=items[target_index],
+        )
+
+    def _request_item_correction(
+        self,
+        instruction: str,
+        original: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self.available:
+            raise NutritionAIUnavailable("AI-исправление еды не настроено")
+        food_fields = {
+            key: original[key]
+            for key in self._FOOD_FIELDS
+            if key in original
+        }
+        prompt = (
+            "Исправь одну выбранную позицию черновика по сообщению пользователя. "
+            "Верни items ровно с одной полностью пересчитанной позицией. "
+            "Не возвращай исходную гипотезу вторым item. Перечисленные в названии "
+            "хлопья, семена, орехи и другие составляющие одного блюда оставь одной "
+            "составной позицией, если пользователь явно не назвал их отдельными блюдами. "
+            "Если пользователь уточнил только массу, сохрани название и состав позиции. "
+            "Оценка КБЖУ приблизительная. Не приписывай ей USDA или иной справочный источник.\n\n"
+            f"Исходная позиция: {json.dumps(food_fields, ensure_ascii=False)}\n"
+            f"Исправление пользователя: {instruction}"
+        )
+        return self._request([{"type": "input_text", "text": prompt}])
+
+    @staticmethod
+    def _validate_instruction(instruction: str) -> str:
+        cleaned = str(instruction).strip()
+        if not cleaned:
+            raise ValueError("Исправление не может быть пустым")
+        return cleaned
+
+    @staticmethod
+    def _copy_current_items(current_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not isinstance(current_items, list) or not current_items:
+            raise ValueError("Нет блюд для исправления")
+        if any(not isinstance(item, dict) for item in current_items):
+            raise ValueError("Некорректный список блюд")
+        return [dict(item) for item in current_items]
+
+    @classmethod
+    def _clarification_intent(cls, instruction: str) -> str:
+        words = instruction.casefold().split()
+        if not words:
+            return "replace"
+        first = words[0].strip(".,!?:;")
+        if first in cls._ADD_COMMANDS:
+            return "append"
+        if first in cls._AMBIGUOUS_ADD_WORDS:
+            return "ambiguous"
+        if first == "а" and len(words) > 1:
+            second = words[1].strip(".,!?:;")
+            if second in cls._AMBIGUOUS_ADD_WORDS:
+                return "ambiguous"
+        return "replace"
+
+    @staticmethod
+    def _resolve_target_index(
+        items: list[dict[str, Any]],
+        item_index: int | None,
+    ) -> int:
+        if item_index is None:
+            if len(items) > 1:
+                raise NutritionAITargetAmbiguous(items)
+            return 0
+        if isinstance(item_index, bool) or not isinstance(item_index, int):
+            raise ValueError("Индекс блюда должен быть целым числом")
+        if item_index < 0 or item_index >= len(items):
+            raise ValueError("Выбранное блюдо не найдено")
+        return item_index
+
+    @classmethod
+    def _finalize_replacement(
+        cls,
+        replacement_items: list[dict[str, Any]],
+        *,
+        instruction: str,
+        original: dict[str, Any],
+    ) -> dict[str, Any]:
+        if len(replacement_items) != 1:
+            raise NutritionAIResponseError(
+                "AI должен вернуть ровно одно исправленное блюдо"
+            )
+        replacement = cls._mark_ai_item(replacement_items[0])
+        weight = cls._explicit_weight_grams(instruction)
+        if weight is not None:
+            returned_weight = replacement.get("weight_g")
+            if not isinstance(returned_weight, (int, float)) or isinstance(returned_weight, bool):
+                raise NutritionAIResponseError(
+                    "AI не связал КБЖУ с массой исправленного блюда"
+                )
+            returned_weight = float(returned_weight)
+            if not math.isfinite(returned_weight) or returned_weight <= 0:
+                raise NutritionAIResponseError(
+                    "AI не связал КБЖУ с массой исправленного блюда"
+                )
+            if not math.isclose(returned_weight, weight):
+                scale = weight / returned_weight
+                for field in ("calories", "protein_g", "fat_g", "carbs_g"):
+                    replacement[field] = round(float(replacement[field]) * scale, 4)
+            replacement["weight_g"] = weight
+            replacement["portion_text"] = f"{weight:g} г"
+        if cls._MASS_ONLY_PATTERN.fullmatch(instruction):
+            replacement["name"] = str(original.get("name", "")).strip()
+        return replacement
+
+    @staticmethod
+    def _mark_ai_item(item: dict[str, Any]) -> dict[str, Any]:
+        marked = {
+            key: item[key]
+            for key in NutritionAI._FOOD_FIELDS
+            if key in item
+        }
+        marked["approximate"] = True
+        marked["calculation_method"] = "ai"
+        return marked
+
+    @classmethod
+    def _explicit_weight_grams(cls, instruction: str) -> float | None:
+        matches = list(cls._GRAMS_PATTERN.finditer(instruction))
+        if len(matches) != 1:
+            return None
+        value = float(matches[0].group(1).replace(",", "."))
+        if not math.isfinite(value) or value <= 0 or value > 100000:
+            raise ValueError("Недопустимое значение: масса")
+        return value
 
     def _request(self, content: list[dict[str, Any]]) -> dict[str, Any]:
         schema_instruction = (

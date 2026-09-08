@@ -12,12 +12,14 @@ import math
 import os
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 
 MAX_QUESTION_CHARS = 2000
 MAX_ANSWER_CHARS = 3500
 MAX_QUESTION_PARTS = 12
+MAX_HISTORY_TURNS = 3
+MAX_HISTORY_CHARS = 3000
 
 
 class NutritionHelpResponseError(ValueError):
@@ -138,6 +140,7 @@ def is_help_question(text: str, *, state: str | None = None) -> bool:
         "clientrem_water", "clientrem_water_value", "clientrem_water_range",
         "clientrem_quiet", "clientrem_preview", "trainerrem_time", "trainerrem_days",
         "trainerrem_compare", "trainerrem_percent", "trainerrem_preview",
+        "draft_correction_target", "draft_correction_text", "edit_draft_field",
     }
     wizard_help_words = (
         "грамм", "процент", "единиц", "формат", "дат", "сколько", "не понял",
@@ -166,8 +169,8 @@ def _is_general_help_intent(value: str) -> bool:
     return any(re.search(pattern, value) for pattern in _GENERAL_HELP_PATTERNS)
 
 
-def _safe_question_for_ai(text: str) -> str | None:
-    """Удаляет из добровольно введённого вопроса секреты и идентификаторы."""
+def sanitize_help_text(text: str) -> str:
+    """Удаляет из текста справки секреты, идентификаторы и детали рациона."""
     safe = re.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "[данные скрыты]", text)
     safe = re.sub(r"\b\d{6,}\b", "[ID скрыт]", safe)
     safe = re.sub(
@@ -175,7 +178,48 @@ def _safe_question_for_ai(text: str) -> str | None:
         "[секрет скрыт]",
         safe,
     )
+    safe = re.sub(
+        r"(?im)\b(?:(?:мой|моя|свой|этот)\s+)?рацион\s*[:=\-]\s*[^\n]+",
+        "[рацион скрыт]",
+        safe,
+    )
+    safe = re.sub(
+        r"(?im)\b(?:я\s+(?:ел|ела|съел|съела)|что\s+я\s+ел(?:а)?)\s*[:=\-]\s*[^\n]+",
+        "[рацион скрыт]",
+        safe,
+    )
     return safe
+
+
+def _safe_question_for_ai(text: str) -> str:
+    """Обратимо сохраняет прежнюю внутреннюю точку вызова sanitizer."""
+    return sanitize_help_text(text)
+
+
+def _safe_history(
+    history: Sequence[Mapping[str, str]] | None,
+) -> list[dict[str, str]]:
+    """Оставляет несколько последних очищенных пар в ограниченном бюджете."""
+    if not history:
+        return []
+    result: list[dict[str, str]] = []
+    used = 0
+    for turn in reversed(list(history)[-MAX_HISTORY_TURNS:]):
+        question = sanitize_help_text(str(turn.get("question", ""))).strip()[:900]
+        answer = sanitize_help_text(str(turn.get("answer", ""))).strip()[:1200]
+        if not question or not answer:
+            continue
+        remaining = MAX_HISTORY_CHARS - used
+        if remaining <= 0:
+            break
+        if len(question) + len(answer) > remaining:
+            answer = answer[: max(0, remaining - len(question))].rstrip()
+        if not answer:
+            break
+        result.append({"question": question, "answer": answer})
+        used += len(question) + len(answer)
+    result.reverse()
+    return result
 
 
 class NutritionHelp:
@@ -220,17 +264,28 @@ class NutritionHelp:
     def available(self) -> bool:
         return self.client is not None
 
-    def answer(self, question: str, context: NutritionHelpContext) -> str:
-        parts = split_help_questions(question)
+    def answer(
+        self,
+        question: str,
+        context: NutritionHelpContext,
+        *,
+        history: Sequence[Mapping[str, str]] | None = None,
+    ) -> str:
+        safe_question = sanitize_help_text(question)
+        parts = split_help_questions(safe_question)
         fallback = self._static_answer(parts, context)
         known_routes = [self._known_route_answer(part, context) for part in parts]
         if all(route is not None for route in known_routes):
             return self._format_answers([str(route) for route in known_routes])
-        safe_question = _safe_question_for_ai(question)
-        if not self.available or safe_question is None:
+        if not self.available:
             return fallback
         try:
-            return self._request(safe_question, parts, context)
+            return self._request(
+                safe_question,
+                parts,
+                context,
+                history=_safe_history(history),
+            )
         except Exception:
             return fallback
 
@@ -243,6 +298,8 @@ class NutritionHelp:
         question: str,
         parts: list[str],
         context: NutritionHelpContext,
+        *,
+        history: Sequence[Mapping[str, str]] = (),
     ) -> str:
         question_indexes = list(range(1, len(parts) + 1))
         schema = {
@@ -301,12 +358,26 @@ class NutritionHelp:
             "или изменил данные: только объясняй следующий шаг в интерфейсе.\n\n"
             f"Роль: {context.role}. Экран: {context.screen}.\n\n{knowledge}"
         )
+        input_messages: list[dict[str, Any]] = [
+            {"role": "system", "content": [{"type": "input_text", "text": system}]}
+        ]
+        for turn in _safe_history(history):
+            input_messages.extend([
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": turn["question"]}],
+                },
+                {
+                    "role": "assistant",
+                    "content": turn["answer"],
+                },
+            ])
+        input_messages.append(
+            {"role": "user", "content": [{"type": "input_text", "text": numbered_questions}]}
+        )
         response = self.client.responses.create(
             model=self.model,
-            input=[
-                {"role": "system", "content": [{"type": "input_text", "text": system}]},
-                {"role": "user", "content": [{"type": "input_text", "text": numbered_questions}]},
-            ],
+            input=input_messages,
             max_output_tokens=1000,
             store=False,
             text={"format": schema},
@@ -437,6 +508,24 @@ class NutritionHelp:
                 f"Сейчас поле «{context.screen.removeprefix('Профиль: ')}». "
                 "Можно ввести новое значение, оставить текущее или не указывать необязательное поле."
             )
+        if context.state == "draft_correction_target":
+            return (
+                "Выберите одно блюдо, которое нужно заменить. Остальные позиции черновика "
+                "останутся без изменений. После исправления проверьте новый расчет и снова "
+                "подтвердите черновик."
+            )
+        if context.state == "draft_correction_text":
+            return (
+                "Опишите выбранное блюдо обычной фразой: укажите правильное название и, "
+                "если известно, массу. ИИ создаст новую приблизительную оценку. Проверьте "
+                "КБЖУ и снова подтвердите черновик."
+            )
+        if context.state == "edit_draft_field":
+            return (
+                f"Сейчас поле «{context.screen.removeprefix('Исправление блюда: ')}». "
+                "Введите одно значение в единицах из подсказки. Для массы бот пересчитает "
+                "КБЖУ порции пропорционально; «⬅️ Назад» вернет к выбору поля."
+            )
         if context.state in {
             "weight_value", "weight_date", "weight_date_other", "weight_time",
             "weight_note", "weight_preview", "weight_edit_value",
@@ -514,7 +603,11 @@ class NutritionHelp:
                     "В «👥 Кабинете тренера» нажмите «🔑 Код для клиентов». Код действует до "
                     "замены. Замена закрывает старый код для новых подключений и сохраняет текущих клиентов."
                 )
-            return "В дневнике нажмите «🔗 Ввести код тренера» и введите код, который дал тренер."
+            return (
+                "В дневнике откройте «⚙️ Настройки», нажмите «🔗 Ввести код тренера» "
+                "и введите код, который дал тренер. На первом экране также есть кнопка "
+                "«🔗 У меня есть код тренера»."
+            )
         if "usda" in value or "справочник" in value or "точн" in value:
             return (
                 "Нажмите «🍽️ Добавить прием пищи» и «📚 Рассчитать по справочнику». Найдите "
@@ -526,13 +619,14 @@ class NutritionHelp:
                 "Фото передается искусственному интеллекту только после согласия и создает "
                 "приблизительный черновик. "
                 "Проверьте блюдо и порцию, затем исправьте, подтвердите или отмените запись. "
-                "Согласие можно отозвать в меню."
+                "Согласие можно отозвать через «⚙️ Настройки»."
             )
         if "вод" in value:
             return "В меню дневника нажмите «💧 Добавить воду», выберите 250/500 мл или введите другой объем."
         if "профил" in value or "рост" in value or "цель" in value:
             return (
-                "В меню дневника откройте «👤 Профиль» и нажмите «✏️ Изменить профиль». "
+                "В меню дневника откройте «⚙️ Настройки», затем «👤 Профиль» и "
+                "нажмите «✏️ Изменить профиль». "
                 "Мастер по очереди спросит имя, рост в см, цель и часовой пояс IANA. "
                 "Изменения записываются только после проверки и подтверждения."
             )
@@ -558,7 +652,10 @@ class NutritionHelp:
                 "Пустой день означает отсутствие записей, а не отсутствие еды."
             )
         if "час" in value or "timezone" in value:
-            return "Нажмите «🕒 Часовой пояс» и введите название IANA, например Europe/Moscow."
+            return (
+                "Откройте «⚙️ Настройки», нажмите «🕒 Часовой пояс» и введите "
+                "название IANA, например Europe/Moscow."
+            )
         if "напомин" in value or "сводк" in value:
             if context.role == "trainer" and "сводк" in value:
                 return (
@@ -566,7 +663,8 @@ class NutritionHelp:
                     "время, порог дней без записей и необязательное сравнение с нормой."
                 )
             return (
-                "В дневнике откройте «⏰ Напоминания». Отдельно настройте время еды, воду и "
+                "В дневнике откройте «⚙️ Настройки», затем «⏰ Напоминания». "
+                "Отдельно настройте время еды, воду и "
                 "тихие часы. Это просьба внести запись, а не утверждение, что приема пищи не было."
             )
         if "назад" in value or "вернут" in value or "отмен" in value:
@@ -580,14 +678,22 @@ class NutritionHelp:
                     "Откройте клиента, нажмите «✏️ Исправить прием» и выберите запись по названию, "
                     "дате и времени. Доступ есть только к привязанным клиентам."
                 )
-            return "В черновике нажмите «✏️ Исправить вручную» до подтверждения записи."
+            return (
+                "В черновике нажмите «✨ Исправить словами», чтобы обычной фразой заменить "
+                "выбранное блюдо, или «✏️ Исправить поле», чтобы изменить название, массу "
+                "или отдельное значение КБЖУ. Для полностью автономного ввода выберите "
+                "«⌨️ Заменить все полным вводом»: можно вставить скопированный черновик, "
+                "шесть строк название/масса/ккал/Б/Ж/У или прежнюю строку с точками с запятой. "
+                "После любого исправления проверьте и снова подтвердите черновик."
+            )
         return NutritionHelp._unknown_answer()
 
     @staticmethod
     def _generic_answer(context: NutritionHelpContext) -> str:
         return (
-            "В дневнике доступны добавление приема пищи и воды, сводки «Сегодня» и «Неделя», "
-            "привязка тренера, часовой пояс и отзыв согласия на фото. "
+            "В дневнике доступны добавление приема пищи и воды, вес, сводки «Сегодня» и "
+            "«Неделя», повтор приема и комментарии тренера. Профиль, напоминания, "
+            "привязка тренера, часовой пояс и отзыв согласия находятся в «⚙️ Настройки». "
             + (
                 "В кабинете тренера также доступны нормы, XLSX-план, исправление и комментарий."
                 if context.role == "trainer"
@@ -606,9 +712,11 @@ class NutritionHelp:
     def _knowledge(role: str) -> str:
         common = (
             "Функции клиента: «🍽️ Добавить прием пищи» с вариантами USDA, фото через ИИ, "
-            "описание с помощью ИИ и ручной КБЖУ; «💧 Добавить воду»; «📊 Сегодня»; "
-            "«📅 Неделя»; «🔗 Ввести код тренера»; «🕒 Часовой пояс»; отзыв согласия; "
-            "«👤 Профиль»; «⚖️ Вес» с историей и исправлением; контекст приема с типом, "
+            "описание с помощью ИИ и ручной КБЖУ; исправление черновика словами, по одному "
+            "полю или полным автономным вводом; «💧 Добавить воду»; «📊 Сегодня»; "
+            "«📅 Неделя»; повтор подтвержденного приема; последние комментарии тренера; "
+            "«⚖️ Вес» с историей и исправлением. В «⚙️ Настройки» находятся код тренера, "
+            "часовой пояс, отзыв согласия, профиль и напоминания. Контекст приема включает тип, "
             "местными датой и временем, заметкой, необязательными голодом и настроением; "
             "одноразовый вход в веб-кабинет; отключение тренера. Фото через ИИ всегда дает "
             "приблизительный черновик. USDA требует выбора "

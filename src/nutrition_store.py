@@ -1004,16 +1004,21 @@ class NutritionStore:
         client_telegram_id: int,
         meal_id: int,
         items: Iterable[dict[str, Any]],
+        expected_version: int | None = None,
     ) -> dict[str, Any]:
         user = self._require_user(client_telegram_id)
-        prepared = self._validate_items(items, require_portion=False)
-        if not prepared:
-            raise ValueError("Нужен хотя бы один продукт или блюдо")
+        submitted = list(items)
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             meal = self._require_owned_meal(db, user["id"], meal_id)
             if meal["status"] != "draft":
                 raise ValueError("Изменять можно только черновик")
+            if expected_version is not None and int(meal["version"]) != int(expected_version):
+                raise RuntimeError("version_conflict")
+            source_items = self._restore_item_provenance(db, meal_id, submitted)
+            prepared = self._validate_items(source_items, require_portion=False)
+            if not prepared:
+                raise ValueError("Нужен хотя бы один продукт или блюдо")
             before = self._meal_by_id(db, meal_id)
             db.execute("DELETE FROM meal_items WHERE meal_id = ?", (meal_id,))
             self._insert_items(db, meal_id, prepared, manually_edited=True)
@@ -1222,6 +1227,163 @@ class NutritionStore:
         with self._connection() as db:
             return self._week_summary(db, user, _parse_date(week_start))
 
+    def list_own_trainer_comments(
+        self,
+        *,
+        client_telegram_id: int,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Возвращает последние комментарии тренеров к приемам клиента."""
+        user = self._require_user(client_telegram_id)
+        try:
+            bounded_limit = max(1, min(int(limit), 100))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Некорректное число комментариев") from exc
+        with self._connection() as db:
+            rows = db.execute(
+                """
+                SELECT
+                    c.id, c.meal_id, c.text, c.created_at,
+                    t.id AS trainer_id, t.display_name AS trainer_display_name,
+                    m.eaten_at, m.local_date, m.timezone, m.meal_type
+                FROM trainer_comments c
+                JOIN meals m ON m.id = c.meal_id
+                JOIN users t ON t.id = c.trainer_user_id
+                WHERE m.client_user_id = ?
+                ORDER BY c.created_at DESC, c.id DESC
+                LIMIT ?
+                """,
+                (user["id"], bounded_limit),
+            ).fetchall()
+            return [
+                {
+                    "id": row["id"],
+                    "meal_id": row["meal_id"],
+                    "text": row["text"],
+                    "created_at": row["created_at"],
+                    "trainer_id": row["trainer_id"],
+                    "trainer_display_name": row["trainer_display_name"],
+                    "meal": {
+                        "id": row["meal_id"],
+                        "eaten_at": row["eaten_at"],
+                        "local_date": row["local_date"],
+                        "timezone": row["timezone"],
+                        "meal_type": row["meal_type"],
+                    },
+                }
+                for row in rows
+            ]
+
+    def list_own_recent_meals(
+        self,
+        *,
+        client_telegram_id: int,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Возвращает последние подтвержденные приемы клиента."""
+        user = self._require_user(client_telegram_id)
+        try:
+            bounded_limit = max(1, min(int(limit), 30))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Некорректное число приемов пищи") from exc
+        with self._connection() as db:
+            rows = db.execute(
+                """
+                SELECT id FROM meals
+                WHERE client_user_id = ? AND status = 'confirmed'
+                ORDER BY eaten_at DESC, id DESC
+                LIMIT ?
+                """,
+                (user["id"], bounded_limit),
+            ).fetchall()
+            return [self._meal_by_id(db, row["id"]) for row in rows]
+
+    def repeat_own_meal(
+        self,
+        *,
+        client_telegram_id: int,
+        meal_id: int,
+        eaten_at: str | datetime,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Копирует подтвержденный прием в новый неподтвержденный черновик."""
+        user = self._require_user(client_telegram_id)
+        eaten_utc = _parse_datetime(eaten_at)
+        key = self._validate_idempotency_key(idempotency_key)
+        timezone_name = user["timezone"]
+        local_date = eaten_utc.astimezone(ZoneInfo(timezone_name)).date().isoformat()
+        fingerprint = _payload_hash({
+            "meal_id": int(meal_id),
+            "eaten_at": eaten_utc.isoformat(timespec="seconds"),
+            "timezone": timezone_name,
+        })
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            source = self._require_owned_meal(db, user["id"], meal_id)
+            previous = db.execute(
+                """
+                SELECT * FROM nutrition_mutation_dedup
+                WHERE actor_user_id=? AND action='repeat_own_meal' AND idempotency_key=?
+                """,
+                (user["id"], key),
+            ).fetchone()
+            if previous is not None:
+                if previous["payload_hash"] != fingerprint:
+                    raise RuntimeError("idempotency_conflict")
+                return self._meal_by_id(db, previous["entity_id"])
+            if source["status"] != "confirmed":
+                raise ValueError("Повторить можно только подтвержденный прием пищи")
+            now = _utc_now()
+            cursor = db.execute(
+                """
+                INSERT INTO meals(
+                    client_user_id, source, photo_file_id, eaten_at, local_date, timezone,
+                    meal_type, note, hunger_level, mood, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, '', NULL, NULL, 'draft', ?, ?)
+                """,
+                (
+                    user["id"], source["source"], None,
+                    eaten_utc.isoformat(timespec="seconds"), local_date, timezone_name,
+                    source["meal_type"], now, now,
+                ),
+            )
+            repeated_meal_id = int(cursor.lastrowid)
+            db.execute(
+                """
+                INSERT INTO meal_items(
+                    meal_id, name, weight_g, portion_text, calories, protein_g,
+                    fat_g, carbs_g, approximate, manually_edited, calculation_method,
+                    reference_fdc_id, reference_source, reference_version, reference_url,
+                    reference_description, reference_preparation, reference_kcal_per_100g,
+                    reference_protein_per_100g, reference_fat_per_100g,
+                    reference_carbs_per_100g, created_at
+                )
+                SELECT
+                    ?, name, weight_g, portion_text, calories, protein_g,
+                    fat_g, carbs_g, approximate, manually_edited, calculation_method,
+                    reference_fdc_id, reference_source, reference_version, reference_url,
+                    reference_description, reference_preparation, reference_kcal_per_100g,
+                    reference_protein_per_100g, reference_fat_per_100g,
+                    reference_carbs_per_100g, ?
+                FROM meal_items WHERE meal_id = ? ORDER BY id
+                """,
+                (repeated_meal_id, now, source["id"]),
+            )
+            self._audit(
+                db, user["id"], "repeat", "meal", repeated_meal_id,
+                {"source_meal_id": source["id"]},
+            )
+            db.execute(
+                """
+                INSERT INTO nutrition_mutation_dedup(
+                    actor_user_id, action, idempotency_key, payload_hash,
+                    entity_type, entity_id, created_at
+                ) VALUES (?, 'repeat_own_meal', ?, ?, 'meal', ?, ?)
+                """,
+                (user["id"], key, fingerprint, repeated_meal_id, now),
+            )
+            return self._meal_by_id(db, repeated_meal_id)
+
     def list_trainer_clients(self, trainer_telegram_id: int) -> list[dict[str, Any]]:
         trainer = self._require_user(trainer_telegram_id)
         with self._connection() as db:
@@ -1397,7 +1559,8 @@ class NutritionStore:
                 values.append(meal_id)
                 db.execute(f"UPDATE meals SET {', '.join(sql_updates)} WHERE id = ?", values)
             if "items" in updates:
-                items = self._validate_items(updates["items"], require_portion=True)
+                source_items = self._restore_item_provenance(db, meal_id, updates["items"])
+                items = self._validate_items(source_items, require_portion=True)
                 if not items:
                     raise ValueError("Нужен хотя бы один продукт или блюдо")
                 db.execute("DELETE FROM meal_items WHERE meal_id = ?", (meal_id,))
@@ -2247,7 +2410,8 @@ class NutritionStore:
                 sql_updates.append("mood=?")
                 values.append(mood)
             if "items" in updates:
-                items = self._validate_items(updates["items"], require_portion=True)
+                source_items = self._restore_item_provenance(db, meal_id, updates["items"])
+                items = self._validate_items(source_items, require_portion=True)
                 if not items:
                     raise ValueError("Нужен хотя бы один продукт или блюдо")
                 db.execute("DELETE FROM meal_items WHERE meal_id=?", (meal_id,))
@@ -3030,6 +3194,46 @@ class NutritionStore:
         if meal is None:
             raise PermissionError("Прием пищи принадлежит другому пользователю или не найден")
         return meal
+
+    @staticmethod
+    def _restore_item_provenance(
+        db: sqlite3.Connection,
+        meal_id: int,
+        items: Iterable[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Берет неизменяемые сведения о расчете из существующих строк приема."""
+        current = {
+            int(row["id"]): dict(row)
+            for row in db.execute(
+                "SELECT * FROM meal_items WHERE meal_id=? ORDER BY id", (meal_id,)
+            ).fetchall()
+        }
+        prepared: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        provenance = {
+            "calculation_method", "approximate", "reference_fdc_id",
+            "reference_source", "reference_version", "reference_url",
+            "reference_description", "reference_preparation",
+            "reference_kcal_per_100g", "reference_protein_per_100g",
+            "reference_fat_per_100g", "reference_carbs_per_100g",
+        }
+        for raw in items:
+            item = dict(raw)
+            raw_id = item.pop("id", None)
+            if raw_id in (None, ""):
+                prepared.append(item)
+                continue
+            try:
+                item_id = int(raw_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Некорректный продукт приема пищи") from exc
+            if item_id in seen or item_id not in current:
+                raise PermissionError("Продукт принадлежит другому приему или не найден")
+            seen.add(item_id)
+            for key in provenance:
+                item[key] = current[item_id].get(key)
+            prepared.append(item)
+        return prepared
 
     @staticmethod
     def _validate_items(

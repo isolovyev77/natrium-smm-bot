@@ -179,6 +179,48 @@ def test_voluntary_question_is_sent_without_database_context():
     assert "telegram_id" not in serialized.casefold()
 
 
+def test_followup_history_is_sanitized_bounded_and_keeps_dialog_roles_separate():
+    client = FakeClient(json.dumps({
+        "answers": [{"question_index": 1, "answer": "Откройте неделю"}],
+    }))
+    helper = NutritionHelp(client=client)
+    history = [
+        {"question": f"Старый вопрос {index}", "answer": f"Старый ответ {index}"}
+        for index in range(4)
+    ] + [{
+        "question": "Мой рацион: овсянка, ID 123456789, token=secret123",
+        "answer": "Ответ про ID 987654321 и рацион: гречка",
+    }]
+
+    answer = helper.answer(
+        "А на этом экране почему иначе?",
+        context("trainer", "norms_value"),
+        history=history,
+    )
+
+    assert answer == "Откройте неделю"
+    call = client.responses.calls[0]
+    assert len(call["input"]) == 8
+    assert [item["role"] for item in call["input"][1:-1]] == [
+        "user", "assistant", "user", "assistant", "user", "assistant",
+    ]
+    assert all(
+        isinstance(item["content"], str)
+        for item in call["input"]
+        if item["role"] == "assistant"
+    )
+    serialized = json.dumps(call, ensure_ascii=False)
+    assert "Старый вопрос 0" not in serialized
+    assert "Старый вопрос 1" not in serialized
+    assert "123456789" not in serialized
+    assert "987654321" not in serialized
+    assert "овсянка" not in serialized.casefold()
+    assert "гречка" not in serialized.casefold()
+    assert "secret123" not in serialized
+    assert "[рацион скрыт]" in serialized
+    assert "[ID скрыт]" in serialized
+
+
 def test_nutrition_units_remain_in_current_question_for_ai():
     client = FakeClient(json.dumps({
         "answers": [{"question_index": 1, "answer": "Используйте исправление"}],
@@ -203,6 +245,31 @@ def test_known_routes_skip_provider_and_use_exact_local_instructions():
     general = helper.answer("Что умеешь?", context("client"))
     assert client.responses.calls == []
     assert "добавление приема пищи и воды" in general
+
+
+def test_settings_routes_and_new_draft_editors_match_visible_buttons():
+    helper = NutritionHelp(api_key="")
+    routes = helper.answer(
+        "Где изменить профиль? Как настроить напоминания? Где ввести код тренера?",
+        context("client"),
+    )
+    assert routes.count("⚙️ Настройки") == 3
+    correction = helper.answer("Как исправить черновик?", context("client", "draft"))
+    assert "✨ Исправить словами" in correction
+    assert "✏️ Исправить поле" in correction
+    assert "⌨️ Заменить все полным вводом" in correction
+    assert "точками с запятой" in correction
+
+    field_help = helper.answer(
+        "Что сюда вводить?",
+        NutritionHelpContext(
+            role="client",
+            state="edit_draft_field",
+            screen="Исправление блюда: масса, г",
+        ),
+    )
+    assert "масса, г" in field_help
+    assert "пересчитает КБЖУ" in field_help
 
 
 def test_question_limits_are_enforced():

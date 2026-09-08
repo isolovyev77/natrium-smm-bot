@@ -646,7 +646,7 @@ def _handler_factory(store: Any, config: DashboardConfig) -> type[BaseHTTPReques
                     )
                     continue
                 allowed = {
-                    "name", "weight_g", "portion_text", "calories", "protein_g",
+                    "id", "name", "weight_g", "portion_text", "calories", "protein_g",
                     "fat_g", "carbs_g", "approximate",
                 }
                 if set(raw) - allowed:
@@ -914,6 +914,13 @@ def _handler_factory(store: Any, config: DashboardConfig) -> type[BaseHTTPReques
                     idempotency_key=self._idempotency_key(self.headers),
                 ))
 
+            if path == "/api/me/trainer-comments" and method == "GET":
+                actor, _, _ = self._authenticate()
+                limit = _positive_int(query.get("limit", ["20"])[0], "limit")
+                return 200, self._data(store.list_own_trainer_comments(
+                    client_telegram_id=actor, limit=limit,
+                ))
+
             if path == "/api/trainer/reminders" and method == "GET":
                 actor, _, _ = self._authenticate(trainer=True)
                 return 200, self._data(store.get_trainer_reminder_preferences(
@@ -952,6 +959,13 @@ def _handler_factory(store: Any, config: DashboardConfig) -> type[BaseHTTPReques
                     limit=int(query.get("limit", [20])[0]),
                 )
                 return 200, self._data(result["items"], next_cursor=result["next_cursor"])
+
+            if path == "/api/me/meals/recent" and method == "GET":
+                actor, _, _ = self._authenticate()
+                limit = _positive_int(query.get("limit", ["10"])[0], "limit")
+                return 200, self._data(store.list_own_recent_meals(
+                    client_telegram_id=actor, limit=limit,
+                ))
 
             if path == "/api/me/meals/drafts" and method == "POST":
                 actor, _, _ = self._authenticate()
@@ -1003,6 +1017,19 @@ def _handler_factory(store: Any, config: DashboardConfig) -> type[BaseHTTPReques
                 return 200, self._data(store.cancel_meal(
                     client_telegram_id=actor, meal_id=_positive_int(match.group(1), "meal_id"),
                     expected_version=self._expected_version(self.headers),
+                ))
+
+            match = re.fullmatch(r"/api/me/meals/(\d+)/repeat", path)
+            if method == "POST" and match:
+                actor, _, _ = self._authenticate()
+                payload = self._read_json()
+                if set(payload) != {"eaten_at"}:
+                    raise ValueError("Для повтора укажите дату и время")
+                return 201, self._data(store.repeat_own_meal(
+                    client_telegram_id=actor,
+                    meal_id=_positive_int(match.group(1), "meal_id"),
+                    eaten_at=payload["eaten_at"],
+                    idempotency_key=self._idempotency_key(self.headers),
                 ))
 
             if path == "/api/me/water" and method == "POST":
