@@ -206,12 +206,44 @@ def test_known_routes_skip_provider_and_use_exact_local_instructions():
 
 
 def test_question_limits_are_enforced():
-    with pytest.raises(ValueError, match="короче"):
+    with pytest.raises(ValueError, match="Разделите запрос"):
         split_help_questions("x" * (MAX_QUESTION_CHARS + 1))
     with pytest.raises(ValueError, match="Напишите вопрос"):
         split_help_questions("  ")
     with pytest.raises(ValueError, match="Разделите запрос"):
-        split_help_questions("? ".join(f"Вопрос {index}" for index in range(9)) + "?")
+        split_help_questions("? ".join(f"Вопрос {index}" for index in range(13)) + "?")
+
+
+def test_nine_questions_are_answered_without_dropping_the_last_one():
+    question = (
+        "Помогите разобраться с дневником. В каждом пункте ниже отдельный вопрос.\n\n"
+        "1. Как добавить воду?\nВыбрать объем и сохранить запись.\n"
+        "2. Где открыть прием пищи?\nНужна кнопка в меню.\n"
+        "3. Как найти продукт в USDA?\nИ указать массу.\n"
+        "4. Как добавить прием по фото?\n"
+        "5. Где посмотреть неделю?\n"
+        "6. Как изменить профиль?\n"
+        "7. Как записать вес?\n"
+        "8. Где ввести код тренера?\n"
+        "9. Как настроить часовой пояс?\n"
+    )
+    parts = split_help_questions(question)
+    assert len(parts) == 9
+    assert parts[0].startswith("Помогите разобраться с дневником")
+    assert "Выбрать объем" in parts[0]
+    assert parts[-1] == "Как настроить часовой пояс"
+    answer = NutritionHelp(api_key="").answer(question, context())
+    assert answer.startswith("1. ")
+    assert "9. " in answer
+
+
+def test_unknown_question_is_honest_and_asks_one_concrete_clarification():
+    answer = NutritionHelp(api_key="").answer(
+        "Почему у меня здесь другое значение?", context()
+    )
+    assert "Точного подтвержденного ответа" in answer
+    assert "На каком экране" in answer
+    assert "общая справка" not in answer.casefold()
 
 
 def test_invalid_timeout_configuration_falls_back_to_bounded_default():

@@ -1,4 +1,5 @@
 import asyncio
+import html
 import importlib.util
 import re
 import sys
@@ -967,15 +968,55 @@ def test_stale_xlsx_confirm_from_another_client_writes_nothing(store, monkeypatc
 class FakeHelpService:
     timeout_seconds = 0.1
 
-    def __init__(self):
+    def __init__(self, result="Ответ по всем пунктам."):
         self.calls = []
+        self.result = result
 
     def answer(self, question, help_context):
         self.calls.append((question, help_context))
-        return "Ответ по всем пунктам."
+        return self.result
 
     def fallback_answer(self, question, help_context):
         return "Встроенная справка."
+
+
+def test_long_help_answer_is_split_and_keyboard_is_only_on_last_message(store):
+    result = "\n\n".join(f"{index}. Пункт справки: {'текст ' * 700}" for index in range(1, 10))
+    helper = FakeHelpService(result)
+    ctl = controller(store, help_service=helper)
+    ctl._ensure_user(make_update())
+    context = make_context(state={"nutrition_active": True})
+
+    question = make_update(text="Что вы умеете?")
+    run(ctl.handle_text(question, context))
+
+    messages = question.message.outbound
+    assert len(messages) > 1
+    assert all(len(text) <= 3900 for text, _ in messages)
+    assert all("reply_markup" not in kwargs for _, kwargs in messages[:-1])
+    assert "nutrition:help_resume" in nutrition_callbacks(messages[-1][1]["reply_markup"])
+    assert "1. Пункт справки" in "\n\n".join(text for text, _ in messages)
+    assert "9. Пункт справки" in "\n\n".join(text for text, _ in messages)
+    assert context.user_data["nutrition_state"] == "nutrition_help_question"
+
+
+def test_help_split_escapes_complete_fragments_and_counts_utf16_units(store):
+    result = "x" * 3898 + "😀<>&\"'" + "\n\nхвост"
+    helper = FakeHelpService(result)
+    ctl = controller(store, help_service=helper)
+    ctl._ensure_user(make_update())
+    context = make_context(state={"nutrition_active": True})
+
+    question = make_update(text="Что вы умеете?")
+    run(ctl.handle_text(question, context))
+
+    sent = [text for text, _ in question.message.outbound]
+    escaped = "".join(sent)
+    assert "&lt;" in escaped and "&gt;" in escaped and "&amp;" in escaped
+    assert "&quot;" in escaped and "&#x27;" in escaped
+    assert sum(text.count("😀") for text in sent) == 1
+    assert "".join(html.unescape(text) for text in sent) == result
+    assert all(len(html.unescape(text).encode("utf-16-le")) // 2 <= 3900 for text in sent)
 
 
 def test_natural_help_from_menu_and_manual_field_preserves_input_state(store):

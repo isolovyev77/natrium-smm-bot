@@ -17,7 +17,7 @@ from typing import Any
 
 MAX_QUESTION_CHARS = 2000
 MAX_ANSWER_CHARS = 3500
-MAX_QUESTION_PARTS = 8
+MAX_QUESTION_PARTS = 12
 
 
 class NutritionHelpResponseError(ValueError):
@@ -41,19 +41,34 @@ def split_help_questions(text: str) -> list[str]:
     if not normalized:
         raise ValueError("Напишите вопрос о работе дневника")
     if len(normalized) > MAX_QUESTION_CHARS:
-        raise ValueError(f"Вопрос должен быть короче {MAX_QUESTION_CHARS} символов")
+        raise ValueError(
+            f"Сообщение длиннее допустимых {MAX_QUESTION_CHARS} символов. "
+            "Разделите запрос на несколько сообщений."
+        )
 
-    lines = [
-        re.sub(r"^\s*(?:\d{1,2}[.)]|[-*•])\s*", "", line).strip()
-        for line in normalized.splitlines()
-        if line.strip()
-    ]
-    numbered = len(lines) > 1 and any(
+    raw_lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+    numbered = len(raw_lines) > 1 and any(
         re.match(r"^\s*(?:\d{1,2}[.)]|[-*•])\s+", line)
         for line in normalized.splitlines()
     )
     if numbered:
-        parts = lines
+        parts: list[str] = []
+        current: list[str] = []
+        preamble: list[str] = []
+        for line in raw_lines:
+            marker = re.match(r"^\s*(?:\d{1,2}[.)]|[-*•])\s+", line)
+            if marker:
+                if current:
+                    parts.append(" ".join(current))
+                current = [line[marker.end():].strip()]
+            elif current:
+                current.append(line)
+            else:
+                preamble.append(line)
+        if current:
+            parts.append(" ".join(current))
+        if preamble and parts:
+            parts[0] = " ".join([*preamble, parts[0]])
     else:
         parts = [part.strip() for part in re.findall(r"[^?？]+(?:[?？]|$)", normalized)]
     parts = [part.rstrip("?？. ").strip() for part in parts if part.strip()]
@@ -278,6 +293,9 @@ class NutritionHelp:
             "Под каждым вопросом дана проверенная локальная инструкция. Можно сделать ее понятнее, "
             "но нельзя менять порядок действий, названия кнопок, роль или место действия. "
             "Если не можешь сохранить маршрут точно, повтори проверенную инструкцию дословно. "
+            "Если проверенной инструкции недостаточно для точного ответа на вопрос, честно скажи, "
+            "что точного подтвержденного ответа нет, и задай один конкретный вопрос о текущем "
+            "экране или действии пользователя. Не подменяй такой ответ общей справкой. "
             "Не проси Telegram ID, рацион, "
             "фото, пароль или код. Не выполняй действий и не утверждай, что отправил сообщение "
             "или изменил данные: только объясняй следующий шаг в интерфейсе.\n\n"
@@ -563,7 +581,7 @@ class NutritionHelp:
                     "дате и времени. Доступ есть только к привязанным клиентам."
                 )
             return "В черновике нажмите «✏️ Исправить вручную» до подтверждения записи."
-        return NutritionHelp._generic_answer(context)
+        return NutritionHelp._unknown_answer()
 
     @staticmethod
     def _generic_answer(context: NutritionHelpContext) -> str:
@@ -575,6 +593,13 @@ class NutritionHelp:
                 if context.role == "trainer"
                 else "Напишите, про какую кнопку или шаг нужно объяснение."
             )
+        )
+
+    @staticmethod
+    def _unknown_answer() -> str:
+        return (
+            "Точного подтвержденного ответа по этому вопросу у меня сейчас нет. "
+            "На каком экране вы находитесь и какую кнопку или действие хотите выполнить?"
         )
 
     @staticmethod

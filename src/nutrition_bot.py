@@ -30,6 +30,7 @@ from src.nutrition_store import NutritionStore
 
 
 PHOTO_CONSENT_VERSION = "nutrition-photo-v1"
+MAX_HELP_REPLY_CHARS = 3900
 
 
 def parse_trainer_ids(value: str | None = None) -> set[int]:
@@ -1412,11 +1413,31 @@ class NutritionBotController:
         except Exception:
             answer = self.help_service.fallback_answer(question, help_context)
         context.user_data["nutrition_state"] = "nutrition_help_question"
-        await update.message.reply_text(
-            html.escape(answer),
-            parse_mode="HTML",
-            reply_markup=self._help_keyboard(),
-        )
+        chunks = self._split_help_reply(answer)
+        for index, chunk in enumerate(chunks):
+            kwargs: dict[str, Any] = {"parse_mode": "HTML"}
+            if index == len(chunks) - 1:
+                kwargs["reply_markup"] = self._help_keyboard()
+            await update.message.reply_text(html.escape(chunk), **kwargs)
+
+    @staticmethod
+    def _split_help_reply(answer: str) -> list[str]:
+        """Разбивает справку на безопасные сообщения, сохраняя абзацы и порядок."""
+        def units(value: str) -> int:
+            return len(value.encode("utf-16-le")) // 2
+
+        if units(answer) <= MAX_HELP_REPLY_CHARS:
+            return [answer]
+        chunks: list[str] = []
+        current = ""
+        for character in answer:
+            if current and units(current + character) > MAX_HELP_REPLY_CHARS:
+                chunks.append(current)
+                current = ""
+            current += character
+        if current:
+            chunks.append(current)
+        return chunks or [""]
 
     async def _resume_help(
         self,
